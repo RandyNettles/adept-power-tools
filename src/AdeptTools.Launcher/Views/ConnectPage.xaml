@@ -1,0 +1,158 @@
+<UserControl x:Class="AdeptTools.Launcher.Views.ConnectPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:converters="clr-namespace:AdeptTools.Launcher.Converters"
+             xmlns:models="clr-namespace:AdeptTools.Core.Models;assembly=AdeptTools.Core">
+    <UserControl.Resources>
+        <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
+        <converters:ConnectionStatusToColorConverter x:Key="StatusColorConverter" />
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel MaxWidth="520" HorizontalAlignment="Left">
+
+            <!-- Page Title -->
+            <TextBlock Text="Connection"
+                       FontSize="{StaticResource FontSizeSubtitle1}"
+                       FontWeight="{StaticResource FontWeightSemibold}"
+                       Foreground="{StaticResource Neutral900Brush}"
+                       Margin="0,0,0,24" />
+
+            <!-- Connection Card -->
+            <Border Background="{StaticResource NeutralWhiteBrush}"
+                    BorderBrush="{StaticResource Neutral200Brush}"
+                    BorderThickness="1"
+                    CornerRadius="{StaticResource RadiusS}"
+                    Padding="24">
+                <StackPanel>
+
+                    <!-- Backend Selector -->
+                    <TextBlock Text="Backend"
+                               FontSize="{StaticResource FontSizeCaption2}"
+                               FontWeight="{StaticResource FontWeightMedium}"
+                               Foreground="{StaticResource Neutral600Brush}"
+                               Margin="0,0,0,6" />
+                    <ComboBox SelectedValue="{Binding SelectedBackend}"
+                              SelectedValuePath="Tag"
+                              Style="{StaticResource DefaultComboBoxStyle}"
+                              Margin="0,0,0,16">
+                        <ComboBoxItem Content="HTTP (12.X)" Tag="{x:Static models:BackendType.Http}" />
+                        <ComboBoxItem Content="COM (11.X)" Tag="{x:Static models:BackendType.Com}" />
+                    </ComboBox>
+
+                    <!-- HTTP Fields (hidden when COM or Mock) -->
+                    <StackPanel Visibility="{Binding ShowHttpFields, Converter={StaticResource BoolToVis}}">
+
+                        <TextBlock Text="Server URL"
+                                   FontSize="{StaticResource FontSizeCaption2}"
+                                   FontWeight="{StaticResource FontWeightMedium}"
+                                   Foreground="{StaticResource Neutral600Brush}"
+                                   Margin="0,0,0,6" />
+                        <TextBox Text="{Binding ServerUrl, UpdateSourceTrigger=PropertyChanged}"
+                                 Style="{StaticResource DefaultTextBoxStyle}"
+                                 Margin="0,0,0,16" />
+
+                        <TextBlock Text="Username"
+                                   FontSize="{StaticResource FontSizeCaption2}"
+                                   FontWeight="{StaticResource FontWeightMedium}"
+                                   Foreground="{StaticResource Neutral600Brush}"
+                                   Margin="0,0,0,6" />
+                        <TextBox Text="{Binding UserName, UpdateSourceTrigger=PropertyChanged}"
+                                 Style="{StaticResource DefaultTextBoxStyle}"
+                                 Margin="0,0,0,16" />
+
+                        <TextBlock Text="Password"
+                                   FontSize="{StaticResource FontSizeCaption2}"
+                                   FontWeight="{StaticResource FontWeightMedium}"
+                                   Foreground="{StaticResource Neutral600Brush}"
+                                   Margin="0,0,0,6" />
+                        <PasswordBox x:Name="PasswordBox"
+                                     Style="{StaticResource DefaultPasswordBoxStyle}"
+                                     PasswordChanged="PasswordBox_PasswordChanged"
+                                     Margin="0,0,0,16" />
+                    </StackPanel>
+
+                    <!-- Mock Mode Toggle -->
+                    <Border Background="{StaticResource NeutralBgBrush}"
+                            CornerRadius="{StaticResource RadiusDefault}"
+                            Padding="12" Margin="0,0,0,20">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Demo Mode"
+                                           FontSize="{StaticResource FontSizeBody1}"
+                                           FontWeight="{StaticResource FontWeightMedium}"
+                                           Foreground="{StaticResource Neutral900Brush}" />
+                                <TextBlock Text="Use mock services instead of a real server"
+                                           FontSize="{StaticResource FontSizeCaption2}"
+                                           Foreground="{StaticResource Neutral500Brush}"
+                                           Margin="0,2,0,0" />
+                            </StackPanel>
+                            <CheckBox Grid.Column="1"
+                                      IsChecked="{Binding IsMockMode}"
+                                      VerticalAlignment="Center" />
+                        </Grid>
+                    </Border>
+
+                    <!-- Test Connection Button -->
+                    <Button Content="Test Connection"
+                            Command="{Binding TestConnectionCommand}"
+                            Style="{StaticResource PrimaryButtonStyle}"
+                            HorizontalAlignment="Left"
+                            Margin="0,0,0,16" />
+
+                    <!-- Status Indicator -->
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                        <Ellipse Width="10" Height="10"
+                                 Fill="{Binding Status, Converter={StaticResource StatusColorConverter}}"
+                                 VerticalAlignment="Center" />
+                        <TextBlock Text="{Binding StatusText}"
+                                   FontSize="{StaticResource FontSizeBody1}"
+                                   Foreground="{StaticResource Neutral600Brush}"
+                                   VerticalAlignment="Center" Margin="8,0,0,0" />
+                    </StackPanel>
+
+                    <!-- Connected Info -->
+                    <Border Visibility="{Binding DisplayName, Converter={StaticResource BoolToVis}}"
+                            Background="{StaticResource SuccessBgBrush}"
+                            BorderBrush="{StaticResource SuccessBrush}"
+                            BorderThickness="1"
+                            CornerRadius="{StaticResource RadiusDefault}"
+                            Padding="12" Margin="0,12,0,0">
+                        <StackPanel>
+                            <TextBlock FontSize="{StaticResource FontSizeBody1}"
+                                       Foreground="{StaticResource SuccessTextBrush}">
+                                <Run Text="User: " FontWeight="{StaticResource FontWeightMedium}" />
+                                <Run Text="{Binding DisplayName, Mode=OneWay}" />
+                            </TextBlock>
+                            <TextBlock FontSize="{StaticResource FontSizeCaption2}"
+                                       Foreground="{StaticResource SuccessTextBrush}"
+                                       Margin="0,4,0,0">
+                                <Run Text="Version: " FontWeight="{StaticResource FontWeightMedium}" />
+                                <Run Text="{Binding ServerVersion, Mode=OneWay}" />
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Error Message -->
+                    <Border Visibility="{Binding ErrorMessage, Converter={StaticResource BoolToVis}}"
+                            Background="{StaticResource ErrorBgBrush}"
+                            BorderBrush="{StaticResource ErrorBrush}"
+                            BorderThickness="1"
+                            CornerRadius="{StaticResource RadiusDefault}"
+                            Padding="12" Margin="0,12,0,0">
+                        <TextBlock Text="{Binding ErrorMessage}"
+                                   FontSize="{StaticResource FontSizeBody1}"
+                                   Foreground="{StaticResource ErrorTextBrush}"
+                                   TextWrapping="Wrap" />
+                    </Border>
+
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

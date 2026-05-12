@@ -1,0 +1,120 @@
+<UserControl x:Class="AdeptTools.Launcher.Views.TemplatePage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:converters="clr-namespace:AdeptTools.Launcher.Converters"
+             xmlns:vm="clr-namespace:AdeptTools.Launcher.ViewModels">
+    <UserControl.Resources>
+        <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
+    </UserControl.Resources>
+
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <StackPanel MaxWidth="520" HorizontalAlignment="Left">
+
+            <!-- Page Title -->
+            <TextBlock Text="Template Generation"
+                       FontSize="{StaticResource FontSizeSubtitle1}"
+                       FontWeight="{StaticResource FontWeightSemibold}"
+                       Foreground="{StaticResource Neutral900Brush}"
+                       Margin="0,0,0,24" />
+
+            <!-- Template Card -->
+            <Border Background="{StaticResource NeutralWhiteBrush}"
+                    BorderBrush="{StaticResource Neutral200Brush}"
+                    BorderThickness="1"
+                    CornerRadius="{StaticResource RadiusS}"
+                    Padding="24">
+                <StackPanel>
+
+                    <!-- Workbook Type -->
+                    <TextBlock Text="Workbook Type"
+                               FontSize="{StaticResource FontSizeCaption2}"
+                               FontWeight="{StaticResource FontWeightMedium}"
+                               Foreground="{StaticResource Neutral600Brush}"
+                               Margin="0,0,0,6" />
+                    <ComboBox SelectedValue="{Binding SelectedType}"
+                              SelectedValuePath="Tag"
+                              Style="{StaticResource DefaultComboBoxStyle}"
+                              Margin="0,0,0,16">
+                        <ComboBoxItem Content="Data Import" Tag="{x:Static vm:WorkbookType.DataImport}" />
+                        <ComboBoxItem Content="Workflow" Tag="{x:Static vm:WorkbookType.Workflow}" />
+                    </ComboBox>
+
+                    <!-- Output Path -->
+                    <TextBlock Text="Output Path"
+                               FontSize="{StaticResource FontSizeCaption2}"
+                               FontWeight="{StaticResource FontWeightMedium}"
+                               Foreground="{StaticResource Neutral600Brush}"
+                               Margin="0,0,0,6" />
+                    <Grid Margin="0,0,0,20">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="Auto" />
+                        </Grid.ColumnDefinitions>
+                        <TextBox Grid.Column="0"
+                                 Text="{Binding OutputPath, UpdateSourceTrigger=PropertyChanged}"
+                                 Style="{StaticResource DefaultTextBoxStyle}" />
+                        <Button Grid.Column="1"
+                                Content="Browse..."
+                                Command="{Binding BrowseOutputPathCommand}"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Margin="8,0,0,0" />
+                    </Grid>
+
+                    <!-- Generate Button -->
+                    <Button Content="Generate Template"
+                            Command="{Binding GenerateCommand}"
+                            Style="{StaticResource PrimaryButtonStyle}"
+                            HorizontalAlignment="Left"
+                            Margin="0,0,0,16" />
+
+                    <!-- Generating indicator -->
+                    <StackPanel Orientation="Horizontal"
+                                Visibility="{Binding IsGenerating, Converter={StaticResource BoolToVis}}"
+                                Margin="0,0,0,8">
+                        <TextBlock Text="Generating..."
+                                   FontSize="{StaticResource FontSizeBody1}"
+                                   Foreground="{StaticResource Neutral500Brush}" />
+                    </StackPanel>
+
+                    <!-- Result Message (success) -->
+                    <Border Visibility="{Binding IsSuccess, Converter={StaticResource BoolToVis}}"
+                            Background="{StaticResource SuccessBgBrush}"
+                            BorderBrush="{StaticResource SuccessBrush}"
+                            BorderThickness="1"
+                            CornerRadius="{StaticResource RadiusDefault}"
+                            Padding="12" Margin="0,4,0,0">
+                        <TextBlock Text="{Binding ResultMessage}"
+                                   FontSize="{StaticResource FontSizeBody1}"
+                                   Foreground="{StaticResource SuccessTextBrush}"
+                                   TextWrapping="Wrap" />
+                    </Border>
+
+                    <!-- Result Message (error) -->
+                    <Border Visibility="{Binding ResultMessage, Converter={StaticResource BoolToVis}}"
+                            Background="{StaticResource ErrorBgBrush}"
+                            BorderBrush="{StaticResource ErrorBrush}"
+                            BorderThickness="1"
+                            CornerRadius="{StaticResource RadiusDefault}"
+                            Padding="12" Margin="0,4,0,0">
+                        <Border.Style>
+                            <Style TargetType="Border">
+                                <Setter Property="Visibility" Value="Collapsed" />
+                                <Style.Triggers>
+                                    <DataTrigger Binding="{Binding IsSuccess}" Value="False">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                    </DataTrigger>
+                                </Style.Triggers>
+                            </Style>
+                        </Border.Style>
+                        <TextBlock Text="{Binding ResultMessage}"
+                                   FontSize="{StaticResource FontSizeBody1}"
+                                   Foreground="{StaticResource ErrorTextBrush}"
+                                   TextWrapping="Wrap" />
+                    </Border>
+
+                </StackPanel>
+            </Border>
+
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

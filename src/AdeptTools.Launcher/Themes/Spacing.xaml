@@ -1,0 +1,40 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+
+    <!-- Spacing -->
+    <Thickness x:Key="SpacingNone">0</Thickness>
+    <Thickness x:Key="Spacing3xs">2</Thickness>
+    <Thickness x:Key="SpacingXxs">4</Thickness>
+    <Thickness x:Key="SpacingXs">8</Thickness>
+    <Thickness x:Key="SpacingS">10</Thickness>
+    <Thickness x:Key="SpacingM">12</Thickness>
+    <Thickness x:Key="SpacingL">16</Thickness>
+    <Thickness x:Key="SpacingXl">20</Thickness>
+    <Thickness x:Key="Spacing2xl">24</Thickness>
+    <Thickness x:Key="Spacing3xl">28</Thickness>
+    <Thickness x:Key="Spacing4xl">32</Thickness>
+
+    <!-- Spacing as doubles (for Width/Height properties) -->
+    <sys:Double x:Key="SpacingNoneValue">0</sys:Double>
+    <sys:Double x:Key="SpacingXsValue">8</sys:Double>
+    <sys:Double x:Key="SpacingSValue">10</sys:Double>
+    <sys:Double x:Key="SpacingMValue">12</sys:Double>
+    <sys:Double x:Key="SpacingLValue">16</sys:Double>
+    <sys:Double x:Key="SpacingXlValue">20</sys:Double>
+    <sys:Double x:Key="Spacing2xlValue">24</sys:Double>
+
+    <!-- Border Radius -->
+    <CornerRadius x:Key="RadiusNone">0</CornerRadius>
+    <CornerRadius x:Key="RadiusDefault">4</CornerRadius>
+    <CornerRadius x:Key="RadiusS">8</CornerRadius>
+    <CornerRadius x:Key="RadiusM">12</CornerRadius>
+    <CornerRadius x:Key="RadiusL">16</CornerRadius>
+    <CornerRadius x:Key="RadiusCircle">9999</CornerRadius>
+
+    <!-- Button Heights -->
+    <sys:Double x:Key="ButtonHeightSmall">36</sys:Double>
+    <sys:Double x:Key="ButtonHeightMedium">40</sys:Double>
+    <sys:Double x:Key="ButtonHeightLarge">44</sys:Double>
+
+</ResourceDictionary>

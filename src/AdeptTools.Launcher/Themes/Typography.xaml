@@ -1,0 +1,25 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+
+    <!-- Font Family -->
+    <FontFamily x:Key="FontFamilyPrimary">Segoe UI, Inter, sans-serif</FontFamily>
+
+    <!-- Font Sizes -->
+    <sys:Double x:Key="FontSizeCaption1">10</sys:Double>
+    <sys:Double x:Key="FontSizeCaption2">12</sys:Double>
+    <sys:Double x:Key="FontSizeBody1">14</sys:Double>
+    <sys:Double x:Key="FontSizeBody2">16</sys:Double>
+    <sys:Double x:Key="FontSizeSubtitle1">18</sys:Double>
+
+    <!-- Line Heights -->
+    <sys:Double x:Key="LineHeightBody1">22</sys:Double>
+    <sys:Double x:Key="LineHeightBody2">24</sys:Double>
+
+    <!-- Font Weights -->
+    <FontWeight x:Key="FontWeightNormal">Normal</FontWeight>
+    <FontWeight x:Key="FontWeightMedium">Medium</FontWeight>
+    <FontWeight x:Key="FontWeightSemibold">SemiBold</FontWeight>
+    <FontWeight x:Key="FontWeightBold">Bold</FontWeight>
+
+</ResourceDictionary>

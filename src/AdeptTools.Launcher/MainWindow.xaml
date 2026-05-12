@@ -1,0 +1,111 @@
+<Window x:Class="AdeptTools.Launcher.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:AdeptTools.Launcher.Controls"
+        xmlns:vm="clr-namespace:AdeptTools.Launcher.ViewModels"
+        xmlns:views="clr-namespace:AdeptTools.Launcher.Views"
+        Title="Adept Toolbox"
+        Width="960" Height="640"
+        MinWidth="700" MinHeight="480"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource NeutralWhiteBrush}"
+        FontFamily="{StaticResource FontFamilyPrimary}">
+
+    <Window.Resources>
+        <!-- DataTemplate mappings: ViewModel → View -->
+        <DataTemplate DataType="{x:Type vm:ConnectViewModel}">
+            <views:ConnectPage />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:TemplateViewModel}">
+            <views:TemplatePage />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:WorkflowViewModel}">
+            <TextBlock Text="Workflows — coming soon"
+                       FontSize="{StaticResource FontSizeSubtitle1}"
+                       Foreground="{StaticResource Neutral400Brush}"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </DataTemplate>
+        <DataTemplate DataType="{x:Type vm:ImportViewModel}">
+            <TextBlock Text="Import — coming soon"
+                       FontSize="{StaticResource FontSizeSubtitle1}"
+                       Foreground="{StaticResource Neutral400Brush}"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </DataTemplate>
+    </Window.Resources>
+
+    <WindowChrome.WindowChrome>
+        <WindowChrome CaptionHeight="36"
+                      ResizeBorderThickness="6"
+                      GlassFrameThickness="0"
+                      CornerRadius="0"
+                      UseAeroCaptionButtons="False" />
+    </WindowChrome.WindowChrome>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="36" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- Custom Title Bar -->
+        <Grid Grid.Row="0" Background="{StaticResource NeutralBgBrush}">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBlock Grid.Column="0"
+                       Text="Adept Toolbox"
+                       FontSize="{StaticResource FontSizeBody1}"
+                       FontWeight="{StaticResource FontWeightSemibold}"
+                       Foreground="{StaticResource Neutral900Brush}"
+                       VerticalAlignment="Center" Margin="16,0,0,0" />
+
+            <!-- Window buttons -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal"
+                        WindowChrome.IsHitTestVisibleInChrome="True">
+                <Button x:Name="MinButton" Content="&#xE921;" Click="MinButton_Click"
+                        Style="{StaticResource TitleBarButtonStyle}" />
+                <Button x:Name="MaxButton" Content="&#xE922;" Click="MaxButton_Click"
+                        Style="{StaticResource TitleBarButtonStyle}" />
+                <Button x:Name="CloseButton" Content="&#xE8BB;" Click="CloseButton_Click"
+                        Style="{StaticResource TitleBarCloseButtonStyle}" />
+            </StackPanel>
+        </Grid>
+
+        <!-- Body -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="200" />
+                <ColumnDefinition Width="1" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Sidebar -->
+            <controls:SidebarControl Grid.Column="0" DataContext="{Binding}" />
+
+            <!-- Divider -->
+            <Border Grid.Column="1" Background="{StaticResource Neutral200Brush}" />
+
+            <!-- Content Area -->
+            <ContentControl Grid.Column="2"
+                            Content="{Binding CurrentPage}"
+                            Margin="24">
+                <ContentControl.Style>
+                    <Style TargetType="ContentControl">
+                        <Style.Triggers>
+                            <EventTrigger RoutedEvent="ContentControl.TargetUpdated">
+                                <BeginStoryboard>
+                                    <Storyboard>
+                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
+                                                         From="0" To="1" Duration="0:0:0.2" />
+                                    </Storyboard>
+                                </BeginStoryboard>
+                            </EventTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </ContentControl.Style>
+            </ContentControl>
+        </Grid>
+    </Grid>
+</Window>

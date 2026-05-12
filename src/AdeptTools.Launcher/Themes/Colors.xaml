@@ -1,0 +1,74 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- Primary (Blue) -->
+    <Color x:Key="PrimaryColor">#3654F0</Color>
+    <Color x:Key="PrimaryHoverColor">#2B43C0</Color>
+    <Color x:Key="PrimaryLightColor">#EFF2FE</Color>
+    <Color x:Key="PrimaryDarkColor">#1A2873</Color>
+
+    <SolidColorBrush x:Key="PrimaryBrush" Color="{StaticResource PrimaryColor}" />
+    <SolidColorBrush x:Key="PrimaryHoverBrush" Color="{StaticResource PrimaryHoverColor}" />
+    <SolidColorBrush x:Key="PrimaryLightBrush" Color="{StaticResource PrimaryLightColor}" />
+    <SolidColorBrush x:Key="PrimaryDarkBrush" Color="{StaticResource PrimaryDarkColor}" />
+
+    <!-- Neutrals (Grey) -->
+    <Color x:Key="NeutralWhiteColor">#FFFFFF</Color>
+    <Color x:Key="NeutralBgColor">#F9FAFC</Color>
+    <Color x:Key="Neutral100Color">#F1F3F7</Color>
+    <Color x:Key="Neutral200Color">#E9EBF0</Color>
+    <Color x:Key="Neutral300Color">#D1D5DE</Color>
+    <Color x:Key="Neutral400Color">#9FA5B2</Color>
+    <Color x:Key="Neutral500Color">#686E7D</Color>
+    <Color x:Key="Neutral600Color">#4E5663</Color>
+    <Color x:Key="Neutral700Color">#3A424D</Color>
+    <Color x:Key="Neutral800Color">#1F242E</Color>
+    <Color x:Key="Neutral900Color">#131826</Color>
+
+    <SolidColorBrush x:Key="NeutralWhiteBrush" Color="{StaticResource NeutralWhiteColor}" />
+    <SolidColorBrush x:Key="NeutralBgBrush" Color="{StaticResource NeutralBgColor}" />
+    <SolidColorBrush x:Key="Neutral100Brush" Color="{StaticResource Neutral100Color}" />
+    <SolidColorBrush x:Key="Neutral200Brush" Color="{StaticResource Neutral200Color}" />
+    <SolidColorBrush x:Key="Neutral300Brush" Color="{StaticResource Neutral300Color}" />
+    <SolidColorBrush x:Key="Neutral400Brush" Color="{StaticResource Neutral400Color}" />
+    <SolidColorBrush x:Key="Neutral500Brush" Color="{StaticResource Neutral500Color}" />
+    <SolidColorBrush x:Key="Neutral600Brush" Color="{StaticResource Neutral600Color}" />
+    <SolidColorBrush x:Key="Neutral700Brush" Color="{StaticResource Neutral700Color}" />
+    <SolidColorBrush x:Key="Neutral800Brush" Color="{StaticResource Neutral800Color}" />
+    <SolidColorBrush x:Key="Neutral900Brush" Color="{StaticResource Neutral900Color}" />
+
+    <!-- Success (Green) -->
+    <Color x:Key="SuccessColor">#059669</Color>
+    <Color x:Key="SuccessTextColor">#047753</Color>
+    <Color x:Key="SuccessBgColor">#ECFDF5</Color>
+
+    <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}" />
+    <SolidColorBrush x:Key="SuccessTextBrush" Color="{StaticResource SuccessTextColor}" />
+    <SolidColorBrush x:Key="SuccessBgBrush" Color="{StaticResource SuccessBgColor}" />
+
+    <!-- Error (Red) -->
+    <Color x:Key="ErrorColor">#DC2626</Color>
+    <Color x:Key="ErrorTextColor">#691212</Color>
+    <Color x:Key="ErrorBgColor">#FCEEEE</Color>
+
+    <SolidColorBrush x:Key="ErrorBrush" Color="{StaticResource ErrorColor}" />
+    <SolidColorBrush x:Key="ErrorTextBrush" Color="{StaticResource ErrorTextColor}" />
+    <SolidColorBrush x:Key="ErrorBgBrush" Color="{StaticResource ErrorBgColor}" />
+
+    <!-- Warning (Yellow) -->
+    <Color x:Key="WarningColor">#E3A911</Color>
+    <Color x:Key="WarningTextColor">#8E6B11</Color>
+    <Color x:Key="WarningBgColor">#FFFCF4</Color>
+
+    <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}" />
+    <SolidColorBrush x:Key="WarningTextBrush" Color="{StaticResource WarningTextColor}" />
+    <SolidColorBrush x:Key="WarningBgBrush" Color="{StaticResource WarningBgColor}" />
+
+    <!-- Accent (Purple) -->
+    <Color x:Key="AccentColor">#903AFD</Color>
+    <Color x:Key="AccentBgColor">#F0E4FF</Color>
+
+    <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
+    <SolidColorBrush x:Key="AccentBgBrush" Color="{StaticResource AccentBgColor}" />
+
+</ResourceDictionary>
