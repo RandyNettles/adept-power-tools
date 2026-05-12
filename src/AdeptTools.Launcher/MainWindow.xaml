@@ -89,23 +89,9 @@
 
             <!-- Content Area -->
             <ContentControl Grid.Column="2"
-                            Content="{Binding CurrentPage}"
-                            Margin="24">
-                <ContentControl.Style>
-                    <Style TargetType="ContentControl">
-                        <Style.Triggers>
-                            <EventTrigger RoutedEvent="ContentControl.TargetUpdated">
-                                <BeginStoryboard>
-                                    <Storyboard>
-                                        <DoubleAnimation Storyboard.TargetProperty="Opacity"
-                                                         From="0" To="1" Duration="0:0:0.2" />
-                                    </Storyboard>
-                                </BeginStoryboard>
-                            </EventTrigger>
-                        </Style.Triggers>
-                    </Style>
-                </ContentControl.Style>
-            </ContentControl>
+                            Content="{Binding CurrentPage, NotifyOnTargetUpdated=True}"
+                            Margin="24"
+                            Binding.TargetUpdated="ContentArea_TargetUpdated" />
         </Grid>
     </Grid>
 </Window>

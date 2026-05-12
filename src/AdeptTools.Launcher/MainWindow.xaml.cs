@@ -1,4 +1,7 @@
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Data;
+using System.Windows.Media.Animation;
 using AdeptTools.Launcher.ViewModels;
 
 namespace AdeptTools.Launcher;
@@ -20,4 +23,13 @@ public partial class MainWindow : Window
 
     private void CloseButton_Click(object sender, RoutedEventArgs e)
         => Close();
+
+    private void ContentArea_TargetUpdated(object? sender, DataTransferEventArgs e)
+    {
+        if (sender is ContentControl cc)
+        {
+            var animation = new DoubleAnimation(0, 1, TimeSpan.FromMilliseconds(200));
+            cc.BeginAnimation(OpacityProperty, animation);
+        }
+    }
 }
