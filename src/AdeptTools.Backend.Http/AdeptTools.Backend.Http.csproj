@@ -11,6 +11,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AdeptTools.Core\AdeptTools.Core.csproj" />
+    <ProjectReference Include="..\AdeptTools.Import\AdeptTools.Import.csproj" />
     <ProjectReference Include="..\AdeptTools.Workflow\AdeptTools.Workflow.csproj" />
   </ItemGroup>
 

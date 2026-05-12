@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>AdeptTools.Import</AssemblyName>
+    <RootNamespace>AdeptTools.Import</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="EPPlus" Version="6.2.10" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\AdeptTools.Core\AdeptTools.Core.csproj" />
+  </ItemGroup>
+</Project>

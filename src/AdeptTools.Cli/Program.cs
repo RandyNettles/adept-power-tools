@@ -37,6 +37,7 @@ rootCommand.AddGlobalOption(logOption);
 // Add commands
 rootCommand.AddCommand(AuthCommands.CreateAuthCommand());
 rootCommand.AddCommand(WorkflowCommands.CreateWorkflowCommand());
+rootCommand.AddCommand(ImportCommands.CreateImportCommand());
 
 // Build parser with DI middleware
 var parser = new CommandLineBuilder(rootCommand)

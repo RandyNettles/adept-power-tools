@@ -3,6 +3,9 @@ using AdeptTools.Backend.Http.Auth;
 using AdeptTools.Core.Api;
 using AdeptTools.Core.Auth;
 using AdeptTools.Core.Models;
+using AdeptTools.Import.Api;
+using AdeptTools.Import.Readers;
+using AdeptTools.Import.Services;
 using AdeptTools.Workflow.Api;
 using AdeptTools.Workflow.Input;
 using AdeptTools.Workflow.Services;
@@ -24,6 +27,7 @@ public static class ServiceRegistration
             services.AddSingleton<IAdeptAuthService, MockAdeptAuthService>();
             services.AddSingleton<IAdeptApiClient, MockAdeptApiClient>();
             services.AddSingleton<IWorkflowApiClient, MockWorkflowApiClient>();
+            services.AddSingleton<IImportApiClient, MockImportApiClient>();
         }
         else if (backend == BackendType.Http)
         {
@@ -46,6 +50,11 @@ public static class ServiceRegistration
             {
                 client.BaseAddress = baseUri;
             });
+
+            services.AddHttpClient<IImportApiClient, HttpImportApiClient>(client =>
+            {
+                client.BaseAddress = baseUri;
+            });
         }
         else if (backend == BackendType.Com)
         {
@@ -58,5 +67,14 @@ public static class ServiceRegistration
         services.AddTransient<WorkflowExcelReader>();
         services.AddTransient<WorkflowXmlReader>();
         services.AddTransient<WorkflowValidator>();
+
+        // Import services (backend-agnostic)
+        services.AddTransient<IImportService, ImportService>();
+        services.AddTransient<ImportExcelReader>();
+        services.AddTransient<ImportXmlConfigReader>();
+        services.AddTransient<FieldResolver>();
+        services.AddTransient<MappingValidator>();
+        services.AddTransient<SearchBuilder>();
+        services.AddTransient<AutoMapper>();
     }
 }
