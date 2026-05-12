@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <OutputType>WinExe</OutputType>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>adept-tool-launcher</AssemblyName>
+    <RootNamespace>AdeptTools.Launcher</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AdeptTools.Core\AdeptTools.Core.csproj" />
+  </ItemGroup>
+
+</Project>

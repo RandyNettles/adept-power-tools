@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>AdeptTools.Core</AssemblyName>
+    <RootNamespace>AdeptTools.Core</RootNamespace>
+  </PropertyGroup>
+
+</Project>
