@@ -3,6 +3,10 @@ using AdeptTools.Backend.Http.Auth;
 using AdeptTools.Core.Api;
 using AdeptTools.Core.Auth;
 using AdeptTools.Core.Models;
+using AdeptTools.Workflow.Api;
+using AdeptTools.Workflow.Input;
+using AdeptTools.Workflow.Services;
+using AdeptTools.Workflow.Validation;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AdeptTools.Cli.Infrastructure;
@@ -19,6 +23,7 @@ public static class ServiceRegistration
         {
             services.AddSingleton<IAdeptAuthService, MockAdeptAuthService>();
             services.AddSingleton<IAdeptApiClient, MockAdeptApiClient>();
+            services.AddSingleton<IWorkflowApiClient, MockWorkflowApiClient>();
         }
         else if (backend == BackendType.Http)
         {
@@ -36,11 +41,22 @@ public static class ServiceRegistration
             {
                 client.BaseAddress = baseUri;
             });
+
+            services.AddHttpClient<IWorkflowApiClient, HttpWorkflowApiClient>(client =>
+            {
+                client.BaseAddress = baseUri;
+            });
         }
         else if (backend == BackendType.Com)
         {
             // COM backend implementations will be registered by Backend.Com (Plan 7)
             throw new InvalidOperationException("COM backend is not yet implemented. Use --backend http or --mock.");
         }
+
+        // Workflow services (backend-agnostic)
+        services.AddTransient<IWorkflowService, WorkflowService>();
+        services.AddTransient<WorkflowExcelReader>();
+        services.AddTransient<WorkflowXmlReader>();
+        services.AddTransient<WorkflowValidator>();
     }
 }

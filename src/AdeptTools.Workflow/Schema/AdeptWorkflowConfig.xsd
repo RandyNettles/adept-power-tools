@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="utf-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           elementFormDefault="qualified">
+
+  <xs:element name="AdeptWorkflowConfig">
+    <xs:complexType>
+      <xs:sequence>
+        <xs:element name="ServerUrl" type="xs:string" minOccurs="0" />
+        <xs:element name="ProjectName" type="xs:string" minOccurs="0" />
+        <xs:element name="DryRun" type="xs:boolean" minOccurs="0" />
+        <xs:element name="Workflows" minOccurs="1" maxOccurs="1">
+          <xs:complexType>
+            <xs:sequence>
+              <xs:element name="Workflow" maxOccurs="unbounded">
+                <xs:complexType>
+                  <xs:sequence>
+                    <xs:element name="Memo" type="xs:string" minOccurs="0" />
+                    <xs:element name="TimeoutDays" type="xs:int" minOccurs="0" />
+                    <xs:element name="RecurringTimeoutDays" type="xs:int" minOccurs="0" />
+                    <xs:element name="Steps" minOccurs="1" maxOccurs="1">
+                      <xs:complexType>
+                        <xs:sequence>
+                          <xs:element name="Step" maxOccurs="unbounded">
+                            <xs:complexType>
+                              <xs:sequence>
+                                <xs:element name="Trustees" minOccurs="0" maxOccurs="1">
+                                  <xs:complexType>
+                                    <xs:sequence>
+                                      <xs:element name="Trustee" minOccurs="0" maxOccurs="unbounded">
+                                        <xs:complexType>
+                                          <xs:attribute name="Id" type="xs:string" use="required" />
+                                          <xs:attribute name="Type" use="required">
+                                            <xs:simpleType>
+                                              <xs:restriction base="xs:string">
+                                                <xs:enumeration value="User" />
+                                                <xs:enumeration value="Group" />
+                                                <xs:enumeration value="Meta" />
+                                                <xs:enumeration value="Email" />
+                                              </xs:restriction>
+                                            </xs:simpleType>
+                                          </xs:attribute>
+                                        </xs:complexType>
+                                      </xs:element>
+                                    </xs:sequence>
+                                  </xs:complexType>
+                                </xs:element>
+                              </xs:sequence>
+                              <xs:attribute name="Name" type="xs:string" use="required" />
+                              <xs:attribute name="ApprovalsRequired" type="xs:int" default="0" />
+                              <xs:attribute name="AutoAdvance" type="xs:boolean" default="false" />
+                            </xs:complexType>
+                          </xs:element>
+                        </xs:sequence>
+                      </xs:complexType>
+                    </xs:element>
+                  </xs:sequence>
+                  <xs:attribute name="Name" type="xs:string" use="required" />
+                  <xs:attribute name="Active" type="xs:boolean" default="true" />
+                  <xs:attribute name="ExcludeSaturday" type="xs:boolean" default="false" />
+                  <xs:attribute name="ExcludeSunday" type="xs:boolean" default="false" />
+                </xs:complexType>
+              </xs:element>
+            </xs:sequence>
+          </xs:complexType>
+        </xs:element>
+      </xs:sequence>
+    </xs:complexType>
+  </xs:element>
+
+</xs:schema>

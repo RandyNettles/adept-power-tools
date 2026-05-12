@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <AssemblyName>AdeptTools.Workflow</AssemblyName>
+    <RootNamespace>AdeptTools.Workflow</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="EPPlus" Version="6.2.10" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Schema\AdeptWorkflowConfig.xsd" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AdeptTools.Core\AdeptTools.Core.csproj" />
+  </ItemGroup>
+
+</Project>
