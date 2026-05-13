@@ -11,6 +11,9 @@ public partial class ConnectViewModel : ObservableObject
 {
     private readonly Func<IAdeptAuthService> _authServiceFactory;
     private readonly MockModeState _mockModeState;
+    private string _password = string.Empty;
+
+    public void SetPassword(string password) => _password = password;
 
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(TestConnectionCommand))]
@@ -94,7 +97,7 @@ public partial class ConnectViewModel : ObservableObject
             var url = IsMockMode ? "mock://localhost" : ServerUrl;
             var user = IsMockMode ? "mock-user" : UserName;
 
-            var result = await authService.LoginAsync(url, user);
+            var result = await authService.LoginAsync(url, user, _password);
 
             if (result.Success)
             {

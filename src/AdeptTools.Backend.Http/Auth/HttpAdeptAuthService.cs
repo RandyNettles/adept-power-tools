@@ -18,6 +18,8 @@ public class HttpAdeptAuthService : IAdeptAuthService
     private const int CallbackPortRangeStart = 49100;
     private const int CallbackPortRangeEnd = 49110;
 
+    private string? _serverBaseUrl;
+
     public HttpAdeptAuthService(HttpClient httpClient)
     {
         _httpClient = httpClient;
@@ -28,88 +30,134 @@ public class HttpAdeptAuthService : IAdeptAuthService
 
     public async Task<AuthResult> LoginAsync(string serverUrl, string userName, string password = "", CancellationToken ct = default)
     {
-        var baseUrl = serverUrl.TrimEnd('/') + "/";
-        _httpClient.BaseAddress ??= new Uri(baseUrl);
+        _serverBaseUrl = serverUrl.TrimEnd('/') + "/";
 
-        // Step 1: Fetch SSO settings from the Adept server
-        SsoSettingsResponse ssoSettings;
+        // Step 0: Determine login mode from server bootstrap
+        ClientBootstrapResponse? bootstrap = null;
         try
         {
-            var settingsResponse = await _httpClient.GetAsync("api/single-sign-on/settings", ct);
-            settingsResponse.EnsureSuccessStatusCode();
-            ssoSettings = await settingsResponse.Content.ReadFromJsonAsync<SsoSettingsResponse>(JsonOptions, ct)
-                ?? throw new InvalidOperationException("Empty SSO settings response");
-
-            if (!ssoSettings.OAuthEnabled)
-                return new AuthResult(false, "SSO is not enabled on this server");
-
-            if (string.IsNullOrWhiteSpace(ssoSettings.OAuthAuthority) || string.IsNullOrWhiteSpace(ssoSettings.OAuthClientId))
-                return new AuthResult(false, "SSO is misconfigured on the server (missing authority or client ID)");
+            var bootstrapResponse = await _httpClient.GetAsync($"{_serverBaseUrl}api/admin/options/client-bootstrap", ct);
+            if (bootstrapResponse.IsSuccessStatusCode)
+                bootstrap = await bootstrapResponse.Content.ReadFromJsonAsync<ClientBootstrapResponse>(JsonOptions, ct);
         }
-        catch (HttpRequestException ex)
+        catch (HttpRequestException)
         {
-            return new AuthResult(false, $"Failed to fetch SSO settings: {ex.Message}");
+            // Continue — will attempt OAuth settings next
         }
 
-        // Step 2: Discover IdP endpoints via OIDC discovery
+        var loginMode = bootstrap?.LoginMode ?? (bootstrap?.IsOauthEnabled == true ? "oauth" : "local");
+
+        // Local login mode: username/password directly against the server
+        if (loginMode.Equals("local", StringComparison.OrdinalIgnoreCase))
+            return await LoginWithPasswordAsync(userName, password, ct);
+
+        // Determine which SSO path to use
+        bool useCognito = bootstrap is { IsCognitoConfigured: true, IsOauthEnabled: false };
+        bool useOAuth = bootstrap is null or { IsOauthEnabled: true };
+
+        if (bootstrap is not null && !bootstrap.IsOauthEnabled && !bootstrap.IsCognitoConfigured)
+            return new AuthResult(false, "This server does not have SSO or Cognito configured. Please provide a password for local login.");
+
+        // Step 1: Fetch SSO settings (OAuth or Cognito)
         string authorizeEndpoint;
         string tokenEndpoint;
-        try
+        string clientId;
+        string scope;
+        string stateHash;
+        string? additionalParams = null;
+
+        if (useCognito)
         {
-            var discovery = await DiscoverOidcEndpointsAsync(ssoSettings.OAuthAuthority, ct);
-            authorizeEndpoint = discovery.AuthorizationEndpoint
-                ?? throw new InvalidOperationException("IdP discovery missing authorization_endpoint");
-            tokenEndpoint = discovery.TokenEndpoint
-                ?? throw new InvalidOperationException("IdP discovery missing token_endpoint");
+            // Cognito path (Synergis internal IDP)
+            try
+            {
+                var cognitoResponse = await _httpClient.GetAsync($"{_serverBaseUrl}api/admin/options/cognito-settings", ct);
+                cognitoResponse.EnsureSuccessStatusCode();
+                var cognito = await cognitoResponse.Content.ReadFromJsonAsync<CognitoSettingsResponse>(JsonOptions, ct)
+                    ?? throw new InvalidOperationException("Empty Cognito settings response");
+
+                if (string.IsNullOrWhiteSpace(cognito.AuthUrl) || string.IsNullOrWhiteSpace(cognito.ClientId))
+                    return new AuthResult(false, "Cognito SSO is not properly configured on this server");
+
+                authorizeEndpoint = cognito.AuthUrl!;
+                tokenEndpoint = cognito.AuthUrl!.Replace("/authorize", "/token");
+                clientId = cognito.ClientId!;
+                scope = cognito.Scope ?? "openid email";
+                stateHash = $"cognito-{GenerateState()}";
+            }
+            catch (HttpRequestException ex)
+            {
+                return new AuthResult(false, $"Failed to fetch Cognito settings: {ex.Message}");
+            }
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        else
         {
-            return new AuthResult(false, $"OIDC discovery failed: {ex.Message}");
+            // Customer-configured OAuth IDP
+            try
+            {
+                var settingsResponse = await _httpClient.GetAsync($"{_serverBaseUrl}api/admin/options/OAuthSettings", ct);
+                settingsResponse.EnsureSuccessStatusCode();
+                var oauthSettings = await settingsResponse.Content.ReadFromJsonAsync<SsoSettingsResponse>(JsonOptions, ct)
+                    ?? throw new InvalidOperationException("Empty OAuth settings response");
+
+                if (string.IsNullOrWhiteSpace(oauthSettings.AuthorizationUrl) || string.IsNullOrWhiteSpace(oauthSettings.ClientId))
+                    return new AuthResult(false, "SSO is not configured on this server (missing authorization URL or client ID)");
+
+                authorizeEndpoint = oauthSettings.AuthorizationUrl!;
+                tokenEndpoint = oauthSettings.TokenUrl ?? authorizeEndpoint.Replace("/authorize", "/token");
+                clientId = oauthSettings.ClientId!;
+                scope = oauthSettings.Scope ?? "openid email profile";
+                stateHash = oauthSettings.StateHash ?? GenerateState();
+                additionalParams = oauthSettings.OAuthAdditionalLoginParams;
+            }
+            catch (HttpRequestException ex)
+            {
+                return new AuthResult(false, $"Failed to fetch OAuth settings: {ex.Message}");
+            }
         }
 
-        // Step 3: Start localhost callback listener
+        // Step 2: Start localhost callback listener
         var (listener, redirectUri) = StartCallbackListener();
         if (listener is null)
             return new AuthResult(false, "Unable to start SSO callback listener (ports 49100–49110 in use)");
 
         try
         {
-            // Step 4: Generate PKCE code verifier + challenge
+            // Step 3: Generate PKCE code verifier + challenge
             var codeVerifier = GenerateCodeVerifier();
             var codeChallenge = ComputeCodeChallenge(codeVerifier);
-            var state = GenerateState();
 
-            // Step 5: Open browser to IdP authorize endpoint
-            var scope = ssoSettings.OAuthScope ?? "openid email profile";
-            var authorizeUrl = BuildAuthorizeUrl(authorizeEndpoint, ssoSettings.OAuthClientId, redirectUri,
-                scope, codeChallenge, state, userName, ssoSettings.OAuthAdditionalParameters);
+            // Step 4: Open browser to IdP authorize endpoint
+            var authorizeUrl = BuildAuthorizeUrl(authorizeEndpoint, clientId, redirectUri,
+                scope, codeChallenge, stateHash, useCognito ? null : userName, additionalParams);
+
+            if (useCognito)
+                authorizeUrl += "&prompt=login";
+
             Process.Start(new ProcessStartInfo(authorizeUrl) { UseShellExecute = true });
 
-            // Step 6: Wait for IdP to redirect back with authorization code
-            var callbackResult = await WaitForCallbackAsync(listener, state, ct);
+            // Step 5: Wait for IdP to redirect back with authorization code
+            var callbackResult = await WaitForCallbackAsync(listener, stateHash, ct);
             if (callbackResult.Error is not null)
                 return new AuthResult(false, $"SSO failed: {callbackResult.Error}");
 
             var authCode = callbackResult.Code!;
 
-            // Step 7: Exchange auth code for IdP tokens (client-side)
-            var idpTokens = await ExchangeCodeForTokensAsync(tokenEndpoint, authCode,
-                redirectUri, ssoSettings.OAuthClientId, codeVerifier, ct);
-            if (idpTokens.Error is not null)
-                return new AuthResult(false, $"Token exchange failed: {idpTokens.Error}");
-
-            // Step 8: Call Adept server's oauth-login with IdP token + code details
-            var oauthLoginRequest = new OAuthLoginRequest
+            // Step 6: Call Adept server's /api/Account/login with auth code + PKCE verifier
+            var loginRequest = new AccountLoginRequest
             {
+                UserName = "SSO",
+                Password = "",
                 AuthCode = authCode,
+                SsoStateReceived = stateHash,
+                SsoStateHash = stateHash,
+                RedirectUri = redirectUri,
                 CodeVerifier = codeVerifier,
-                RedirectUri = redirectUri
+                ForceLogin = false,
+                ClientId = "Adept"
             };
 
-            _httpClient.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", idpTokens.AccessToken);
-
-            var loginResponse = await _httpClient.PostAsJsonAsync("api/account/oauth-login", oauthLoginRequest, JsonOptions, ct);
+            var loginResponse = await _httpClient.PostAsJsonAsync($"{_serverBaseUrl}api/Account/login", loginRequest, JsonOptions, ct);
             loginResponse.EnsureSuccessStatusCode();
 
             var authResponse = await loginResponse.Content.ReadFromJsonAsync<AuthenticateResponse>(JsonOptions, ct);
@@ -117,9 +165,9 @@ public class HttpAdeptAuthService : IAdeptAuthService
                 return new AuthResult(false, "Empty response from server");
 
             if (authResponse.StatusCode != 0)
-                return new AuthResult(false, authResponse.ErrorMessage ?? "OAuth login failed");
+                return new AuthResult(false, authResponse.ErrorMessage ?? "SSO login failed");
 
-            // Step 9: Store Adept JWT and set for subsequent API calls
+            // Step 7: Store Adept JWT and set for subsequent API calls
             AccessToken = authResponse.AccessToken;
             IsAuthenticated = true;
             _httpClient.DefaultRequestHeaders.Authorization =
@@ -141,7 +189,7 @@ public class HttpAdeptAuthService : IAdeptAuthService
         }
         catch (HttpRequestException ex)
         {
-            return new AuthResult(false, $"OAuth login failed: {ex.Message}");
+            return new AuthResult(false, $"SSO login failed: {ex.Message}");
         }
         catch (Exception ex)
         {
@@ -151,6 +199,77 @@ public class HttpAdeptAuthService : IAdeptAuthService
         {
             listener.Stop();
         }
+    }
+
+    private async Task<AuthResult> LoginWithPasswordAsync(string userName, string password, CancellationToken ct)
+    {
+        try
+        {
+            var loginRequest = new AccountLoginRequest
+            {
+                UserName = userName,
+                Password = password,
+                ForceLogin = false,
+                ClientId = "Adept"
+            };
+
+            var authResponse = await PostLoginAsync(loginRequest, ct);
+            if (authResponse is null)
+                return new AuthResult(false, "Empty response from server");
+
+            // If user is already logged in, retry with forceLogin
+            if (authResponse.StatusCode != 0 && IsAlreadyLoggedInError(authResponse))
+            {
+                loginRequest.ForceLogin = true;
+                authResponse = await PostLoginAsync(loginRequest, ct);
+                if (authResponse is null)
+                    return new AuthResult(false, "Empty response from server");
+            }
+
+            if (authResponse.StatusCode != 0)
+                return new AuthResult(false, authResponse.ErrorMessage ?? "Login failed");
+
+            AccessToken = authResponse.AccessToken;
+            IsAuthenticated = true;
+            _httpClient.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", AccessToken);
+
+            return new AuthResult(
+                Success: true,
+                AccessToken: authResponse.AccessToken,
+                UserId: authResponse.UserId,
+                UserName: authResponse.UserName,
+                DisplayName: authResponse.DisplayName,
+                EmailAddress: authResponse.EmailAddress,
+                AppVersion: authResponse.AppVersion,
+                WorkAreaId: authResponse.WorkAreaId);
+        }
+        catch (HttpRequestException ex)
+        {
+            return new AuthResult(false, $"Login failed: {ex.Message}");
+        }
+    }
+
+    private async Task<AuthenticateResponse?> PostLoginAsync(AccountLoginRequest request, CancellationToken ct)
+    {
+        var response = await _httpClient.PostAsJsonAsync($"{_serverBaseUrl}api/Account/login", request, JsonOptions, ct);
+
+        // Read body regardless of status code — the server returns JSON even on 400
+        var body = await response.Content.ReadAsStringAsync(ct);
+        if (string.IsNullOrWhiteSpace(body))
+            return null;
+
+        return JsonSerializer.Deserialize<AuthenticateResponse>(body, JsonOptions);
+    }
+
+    private static bool IsAlreadyLoggedInError(AuthenticateResponse response)
+    {
+        // Common status codes for "user already logged in" scenarios
+        var msg = response.ErrorMessage ?? "";
+        return msg.Contains("already logged in", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("already connected", StringComparison.OrdinalIgnoreCase)
+            || msg.Contains("active session", StringComparison.OrdinalIgnoreCase)
+            || response.StatusCode == 160; // EC_USER_ALREADY_LOGGED_IN
     }
 
     public Task LogoutAsync(CancellationToken ct = default)
@@ -176,25 +295,6 @@ public class HttpAdeptAuthService : IAdeptAuthService
 
         return new AuthResult(true, AccessToken: AccessToken);
     }
-
-    #region OIDC Discovery
-
-    private async Task<OidcDiscovery> DiscoverOidcEndpointsAsync(string authority, CancellationToken ct)
-    {
-        var authorityUrl = authority.TrimEnd('/');
-        // Handle Azure AD v2.0 paths
-        var discoveryUrl = authorityUrl.Contains("/v2.0", StringComparison.OrdinalIgnoreCase)
-            ? $"{authorityUrl}/.well-known/openid-configuration"
-            : $"{authorityUrl}/.well-known/openid-configuration";
-
-        using var discoveryClient = new HttpClient();
-        var response = await discoveryClient.GetAsync(discoveryUrl, ct);
-        response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<OidcDiscovery>(JsonOptions, ct)
-            ?? throw new InvalidOperationException("Empty OIDC discovery document");
-    }
-
-    #endregion
 
     #region Authorization URL
 
@@ -304,42 +404,6 @@ public class HttpAdeptAuthService : IAdeptAuthService
 
     #endregion
 
-    #region Token Exchange
-
-    private async Task<TokenResult> ExchangeCodeForTokensAsync(string tokenEndpoint, string code,
-        string redirectUri, string clientId, string codeVerifier, CancellationToken ct)
-    {
-        var content = new FormUrlEncodedContent(new Dictionary<string, string>
-        {
-            ["grant_type"] = "authorization_code",
-            ["code"] = code,
-            ["redirect_uri"] = redirectUri,
-            ["client_id"] = clientId,
-            ["code_verifier"] = codeVerifier
-        });
-
-        using var tokenClient = new HttpClient();
-        var response = await tokenClient.PostAsync(tokenEndpoint, content, ct);
-
-        var json = await response.Content.ReadAsStringAsync(ct);
-        using var doc = JsonDocument.Parse(json);
-        var root = doc.RootElement;
-
-        if (root.TryGetProperty("error", out var errorProp))
-        {
-            var errorDesc = root.TryGetProperty("error_description", out var desc) ? desc.GetString() : errorProp.GetString();
-            return new TokenResult { Error = errorDesc };
-        }
-
-        return new TokenResult
-        {
-            AccessToken = root.TryGetProperty("access_token", out var at) ? at.GetString() : null,
-            IdToken = root.TryGetProperty("id_token", out var idt) ? idt.GetString() : null
-        };
-    }
-
-    #endregion
-
     #region PKCE
 
     private static string GenerateCodeVerifier()
@@ -380,7 +444,7 @@ public class HttpAdeptAuthService : IAdeptAuthService
     {
         try
         {
-            var response = await _httpClient.GetAsync("api/account/isLoggedIn", ct);
+            var response = await _httpClient.GetAsync($"{_serverBaseUrl}api/account/isLoggedIn", ct);
             if (!response.IsSuccessStatusCode) return false;
             var content = await response.Content.ReadAsStringAsync(ct);
             return bool.TryParse(content, out var result) && result;
@@ -395,25 +459,9 @@ public class HttpAdeptAuthService : IAdeptAuthService
 
     #region Internal Types
 
-    private class OidcDiscovery
-    {
-        [System.Text.Json.Serialization.JsonPropertyName("authorization_endpoint")]
-        public string? AuthorizationEndpoint { get; set; }
-
-        [System.Text.Json.Serialization.JsonPropertyName("token_endpoint")]
-        public string? TokenEndpoint { get; set; }
-    }
-
     private class CallbackResult
     {
         public string? Code { get; init; }
-        public string? Error { get; init; }
-    }
-
-    private class TokenResult
-    {
-        public string? AccessToken { get; init; }
-        public string? IdToken { get; init; }
         public string? Error { get; init; }
     }
 
