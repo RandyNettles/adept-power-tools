@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <AssemblyName>AdeptTools.Backend.Com</AssemblyName>
+    <RootNamespace>AdeptTools.Backend.Com</RootNamespace>
+    <UseWindowsForms>false</UseWindowsForms>
+    <UseWPF>false</UseWPF>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AdeptTools.Core\AdeptTools.Core.csproj" />
+    <ProjectReference Include="..\AdeptTools.Import\AdeptTools.Import.csproj" />
+    <ProjectReference Include="..\AdeptTools.Workflow\AdeptTools.Workflow.csproj" />
+  </ItemGroup>
+
+</Project>

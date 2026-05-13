@@ -1,3 +1,6 @@
+using AdeptTools.Backend.Com.Api;
+using AdeptTools.Backend.Com.Auth;
+using AdeptTools.Backend.Com.Infrastructure;
 using AdeptTools.Backend.Http.Api;
 using AdeptTools.Backend.Http.Auth;
 using AdeptTools.Core.Api;
@@ -58,8 +61,12 @@ public static class ServiceRegistration
         }
         else if (backend == BackendType.Com)
         {
-            // COM backend implementations will be registered by Backend.Com (Plan 7)
-            throw new InvalidOperationException("COM backend is not yet implemented. Use --backend http or --mock.");
+            services.AddSingleton<ComOperationRunner>();
+            services.AddSingleton<ComSessionManager>();
+            services.AddSingleton<IAdeptAuthService, ComAdeptAuthService>();
+            services.AddSingleton<IAdeptApiClient, ComAdeptApiClient>();
+            services.AddSingleton<IWorkflowApiClient, ComWorkflowApiClient>();
+            services.AddSingleton<IImportApiClient, ComImportApiClient>();
         }
 
         // Workflow services (backend-agnostic)

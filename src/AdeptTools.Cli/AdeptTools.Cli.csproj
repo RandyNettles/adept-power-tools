@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
     <OutputType>Exe</OutputType>
     <AssemblyName>adept-tool</AssemblyName>
     <RootNamespace>AdeptTools.Cli</RootNamespace>
@@ -19,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AdeptTools.Core\AdeptTools.Core.csproj" />
+    <ProjectReference Include="..\AdeptTools.Backend.Com\AdeptTools.Backend.Com.csproj" />
     <ProjectReference Include="..\AdeptTools.Backend.Http\AdeptTools.Backend.Http.csproj" />
     <ProjectReference Include="..\AdeptTools.Import\AdeptTools.Import.csproj" />
     <ProjectReference Include="..\AdeptTools.Workflow\AdeptTools.Workflow.csproj" />

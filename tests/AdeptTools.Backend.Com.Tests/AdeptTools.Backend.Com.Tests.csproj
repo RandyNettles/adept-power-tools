@@ -2,8 +2,8 @@
 
   <PropertyGroup>
     <TargetFramework>net8.0-windows</TargetFramework>
-    <AssemblyName>AdeptTools.Cli.Tests</AssemblyName>
-    <RootNamespace>AdeptTools.Cli.Tests</RootNamespace>
+    <AssemblyName>AdeptTools.Backend.Com.Tests</AssemblyName>
+    <RootNamespace>AdeptTools.Backend.Com.Tests</RootNamespace>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
 
@@ -17,8 +17,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\AdeptTools.Cli\AdeptTools.Cli.csproj" />
+    <ProjectReference Include="..\..\src\AdeptTools.Backend.Com\AdeptTools.Backend.Com.csproj" />
     <ProjectReference Include="..\..\src\AdeptTools.Core\AdeptTools.Core.csproj" />
+    <ProjectReference Include="..\..\src\AdeptTools.Workflow\AdeptTools.Workflow.csproj" />
+    <ProjectReference Include="..\..\src\AdeptTools.Import\AdeptTools.Import.csproj" />
   </ItemGroup>
 
 </Project>
