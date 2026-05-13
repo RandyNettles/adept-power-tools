@@ -24,6 +24,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\AdeptTools.Launcher\AdeptTools.Launcher.csproj" />
     <ProjectReference Include="..\..\src\AdeptTools.Workflow\AdeptTools.Workflow.csproj" />
+    <ProjectReference Include="..\..\src\AdeptTools.Import\AdeptTools.Import.csproj" />
   </ItemGroup>
 
 </Project>

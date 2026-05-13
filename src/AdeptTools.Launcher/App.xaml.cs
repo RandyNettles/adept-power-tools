@@ -2,6 +2,9 @@ using System.Windows;
 using AdeptTools.Backend.Http.Auth;
 using AdeptTools.Backend.Http.Api;
 using AdeptTools.Core.Auth;
+using AdeptTools.Import.Api;
+using AdeptTools.Import.Readers;
+using AdeptTools.Import.Services;
 using AdeptTools.Launcher.Services;
 using AdeptTools.Launcher.ViewModels;
 using AdeptTools.Workflow.Api;
@@ -66,6 +69,37 @@ public partial class App : Application
                     sp.GetRequiredService<WorkflowExcelReader>(),
                     sp.GetRequiredService<WorkflowXmlReader>(),
                     sp.GetRequiredService<WorkflowValidator>());
+            };
+        });
+
+        // Import services — returns mock or HTTP based on runtime toggle
+        services.AddSingleton<MockImportApiClient>();
+        services.AddHttpClient<HttpImportApiClient>();
+        services.AddSingleton<Func<IImportApiClient>>(sp =>
+        {
+            return () => sp.GetRequiredService<MockModeState>().IsMock
+                ? sp.GetRequiredService<MockImportApiClient>()
+                : sp.GetRequiredService<HttpImportApiClient>();
+        });
+        services.AddTransient<ImportExcelReader>();
+        services.AddTransient<ImportXmlConfigReader>();
+        services.AddTransient<FieldResolver>();
+        services.AddTransient<MappingValidator>();
+        services.AddTransient<SearchBuilder>();
+        services.AddTransient<AutoMapper>();
+        services.AddSingleton<Func<IImportService>>(sp =>
+        {
+            return () =>
+            {
+                var apiClient = sp.GetRequiredService<Func<IImportApiClient>>()();
+                return new ImportService(
+                    apiClient,
+                    sp.GetRequiredService<ImportExcelReader>(),
+                    sp.GetRequiredService<ImportXmlConfigReader>(),
+                    sp.GetRequiredService<FieldResolver>(),
+                    sp.GetRequiredService<MappingValidator>(),
+                    sp.GetRequiredService<SearchBuilder>(),
+                    sp.GetRequiredService<AutoMapper>());
             };
         });
 

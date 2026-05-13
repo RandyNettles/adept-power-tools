@@ -6,7 +6,8 @@ public enum ResultStatus
 {
     Ok,
     Fail,
-    Skip
+    Skip,
+    Add
 }
 
 public partial class ResultItem : ObservableObject
@@ -19,6 +20,7 @@ public partial class ResultItem : ObservableObject
         ResultStatus.Ok => "[OK]",
         ResultStatus.Fail => "[FAIL]",
         ResultStatus.Skip => "[SKIP]",
+        ResultStatus.Add => "[ADD]",
         _ => "[?]"
     };
 

@@ -88,6 +88,9 @@
                                                 <DataTrigger Binding="{Binding Status}" Value="{x:Static vm:ResultStatus.Skip}">
                                                     <Setter Property="Foreground" Value="{StaticResource Neutral400Brush}" />
                                                 </DataTrigger>
+                                                <DataTrigger Binding="{Binding Status}" Value="{x:Static vm:ResultStatus.Add}">
+                                                    <Setter Property="Foreground" Value="{StaticResource AccentBrush}" />
+                                                </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
                                     </TextBlock.Style>

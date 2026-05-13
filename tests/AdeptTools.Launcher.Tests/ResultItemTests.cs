@@ -8,6 +8,7 @@ public class ResultItemTests
     [InlineData(ResultStatus.Ok, "[OK]")]
     [InlineData(ResultStatus.Fail, "[FAIL]")]
     [InlineData(ResultStatus.Skip, "[SKIP]")]
+    [InlineData(ResultStatus.Add, "[ADD]")]
     public void StatusPrefix_MatchesStatus(ResultStatus status, string expectedPrefix)
     {
         var item = new ResultItem(status, "test message");
