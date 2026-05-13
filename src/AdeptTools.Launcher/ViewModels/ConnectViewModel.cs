@@ -31,6 +31,8 @@ public partial class ConnectViewModel : ObservableObject
     [ObservableProperty]
     private ConnectionStatus _status = ConnectionStatus.Disconnected;
 
+    public event EventHandler<ConnectionStatus>? StatusChanged;
+
     [ObservableProperty]
     private string _statusText = "Not connected";
 
@@ -130,5 +132,10 @@ public partial class ConnectViewModel : ObservableObject
         ErrorMessage = null;
         DisplayName = null;
         ServerVersion = null;
+    }
+
+    partial void OnStatusChanged(ConnectionStatus value)
+    {
+        StatusChanged?.Invoke(this, value);
     }
 }

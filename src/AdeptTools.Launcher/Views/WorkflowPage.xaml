@@ -1,0 +1,355 @@
+<UserControl x:Class="AdeptTools.Launcher.Views.WorkflowPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:AdeptTools.Launcher.Controls"
+             xmlns:converters="clr-namespace:AdeptTools.Launcher.Converters"
+             xmlns:vm="clr-namespace:AdeptTools.Launcher.ViewModels">
+
+    <UserControl.Resources>
+        <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Page Header -->
+        <StackPanel Grid.Row="0" Margin="0,0,0,8">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="Workflows"
+                           FontSize="{StaticResource FontSizeSubtitle1}"
+                           FontWeight="{StaticResource FontWeightSemibold}"
+                           Foreground="{StaticResource Neutral900Brush}" />
+
+                <!-- Mock Mode Badge -->
+                <Border Visibility="{Binding IsMockMode, Converter={StaticResource BoolToVis}}"
+                        Background="{StaticResource AccentBgBrush}"
+                        CornerRadius="{StaticResource RadiusDefault}"
+                        Padding="8,2"
+                        VerticalAlignment="Center"
+                        Margin="12,0,0,0">
+                    <TextBlock Text="Mock Mode"
+                               FontSize="{StaticResource FontSizeCaption1}"
+                               FontWeight="{StaticResource FontWeightMedium}"
+                               Foreground="{StaticResource AccentBrush}" />
+                </Border>
+            </StackPanel>
+            <TextBlock Text="Manage workflow definitions"
+                       FontSize="{StaticResource FontSizeBody1}"
+                       Foreground="{StaticResource Neutral600Brush}"
+                       Margin="0,4,0,0" />
+        </StackPanel>
+
+        <!-- Toolbar -->
+        <Border Grid.Row="1"
+                Background="{StaticResource NeutralBgBrush}"
+                CornerRadius="{StaticResource RadiusS}"
+                Padding="12"
+                Margin="0,0,0,12">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- Action Buttons Row -->
+                <WrapPanel Grid.Row="0" Margin="0,0,0,8">
+                    <Button Content="↻ Refresh"
+                            Command="{Binding RefreshCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Height="{StaticResource ButtonHeightSmall}"
+                            Padding="12,0"
+                            Margin="0,0,8,0" />
+
+                    <!-- Create Split: Excel -->
+                    <Button Content="Create from Excel"
+                            Command="{Binding CreateFromExcelCommand}"
+                            Style="{StaticResource PrimaryButtonStyle}"
+                            Height="{StaticResource ButtonHeightSmall}"
+                            Padding="12,0"
+                            Margin="0,0,4,0" />
+
+                    <!-- Create Split: XML -->
+                    <Button Content="Create from XML"
+                            Command="{Binding CreateFromXmlCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Height="{StaticResource ButtonHeightSmall}"
+                            Padding="12,0"
+                            Margin="0,0,8,0" />
+
+                    <Button Content="Modify from File"
+                            Command="{Binding ModifyFromFileCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Height="{StaticResource ButtonHeightSmall}"
+                            Padding="12,0"
+                            Margin="0,0,8,0" />
+
+                    <Button Style="{StaticResource SecondaryButtonStyle}"
+                            Command="{Binding DeleteSelectedCommand}"
+                            Height="{StaticResource ButtonHeightSmall}"
+                            Padding="12,0"
+                            Margin="0,0,8,0">
+                        <Button.Content>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Delete Selected" />
+                                <TextBlock Margin="4,0,0,0"
+                                           Visibility="{Binding SelectedCount, Converter={StaticResource BoolToVis}}">
+                                    <Run Text="(" /><Run Text="{Binding SelectedCount, Mode=OneWay}" /><Run Text=")" />
+                                </TextBlock>
+                            </StackPanel>
+                        </Button.Content>
+                    </Button>
+
+                    <!-- Cancel button (visible during operation) -->
+                    <Button Content="Cancel"
+                            Command="{Binding CancelOperationCommand}"
+                            Visibility="{Binding IsOperationRunning, Converter={StaticResource BoolToVis}}"
+                            Height="{StaticResource ButtonHeightSmall}"
+                            Padding="12,0">
+                        <Button.Style>
+                            <Style TargetType="Button" BasedOn="{StaticResource SecondaryButtonStyle}">
+                                <Setter Property="Foreground" Value="{StaticResource ErrorBrush}" />
+                                <Setter Property="BorderBrush" Value="{StaticResource ErrorBrush}" />
+                            </Style>
+                        </Button.Style>
+                    </Button>
+                </WrapPanel>
+
+                <!-- Filter Row -->
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBox Grid.Column="0"
+                             Text="{Binding FilterText, UpdateSourceTrigger=PropertyChanged, Delay=300}"
+                             Style="{StaticResource DefaultTextBoxStyle}"
+                             Height="{StaticResource ButtonHeightSmall}" />
+
+                    <CheckBox Grid.Column="1"
+                              IsChecked="{Binding IsDryRun}"
+                              VerticalAlignment="Center"
+                              Margin="16,0,0,0">
+                        <TextBlock Text="Dry Run"
+                                   FontSize="{StaticResource FontSizeCaption2}"
+                                   Foreground="{StaticResource Neutral600Brush}" />
+                    </CheckBox>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- Workflow DataGrid -->
+        <Border Grid.Row="2"
+                BorderBrush="{StaticResource Neutral200Brush}"
+                BorderThickness="1"
+                CornerRadius="{StaticResource RadiusS}">
+            <Grid>
+                <DataGrid ItemsSource="{Binding Workflows}"
+                          AutoGenerateColumns="False"
+                          IsReadOnly="True"
+                          CanUserAddRows="False"
+                          CanUserDeleteRows="False"
+                          SelectionMode="Single"
+                          HeadersVisibility="Column"
+                          GridLinesVisibility="Horizontal"
+                          HorizontalGridLinesBrush="{StaticResource Neutral200Brush}"
+                          BorderThickness="0"
+                          Background="Transparent"
+                          RowBackground="{StaticResource NeutralWhiteBrush}"
+                          AlternatingRowBackground="{StaticResource NeutralBgBrush}">
+                    <DataGrid.Columns>
+                        <DataGridTemplateColumn Header="" Width="40">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <CheckBox IsChecked="{Binding IsSelected, UpdateSourceTrigger=PropertyChanged}"
+                                              HorizontalAlignment="Center" />
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+
+                        <DataGridTextColumn Header="Name"
+                                            Binding="{Binding Name}"
+                                            Width="*">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="VerticalAlignment" Value="Center" />
+                                    <Setter Property="Margin" Value="8,0" />
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsLocked}" Value="True">
+                                            <Setter Property="Foreground" Value="{StaticResource Neutral400Brush}" />
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+
+                        <DataGridTemplateColumn Header="Active" Width="60">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <TextBlock HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"
+                                               FontSize="{StaticResource FontSizeBody1}">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="Text" Value="✓" />
+                                                <Setter Property="Foreground" Value="{StaticResource SuccessBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsActive}" Value="False">
+                                                        <Setter Property="Text" Value="✗" />
+                                                        <Setter Property="Foreground" Value="{StaticResource ErrorBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+
+                        <DataGridTextColumn Header="Steps"
+                                            Binding="{Binding StepCount}"
+                                            Width="60">
+                            <DataGridTextColumn.ElementStyle>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="HorizontalAlignment" Value="Center" />
+                                    <Setter Property="VerticalAlignment" Value="Center" />
+                                </Style>
+                            </DataGridTextColumn.ElementStyle>
+                        </DataGridTextColumn>
+
+                        <DataGridTemplateColumn Header="In-Process" Width="80">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <Border HorizontalAlignment="Center"
+                                            VerticalAlignment="Center"
+                                            CornerRadius="{StaticResource RadiusDefault}"
+                                            Padding="6,2"
+                                            MinWidth="28">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Background" Value="Transparent" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding InProcessCount, Converter={x:Static vm:WorkflowPage_Converters.GreaterThanZero}}" Value="True">
+                                                        <Setter Property="Background" Value="{StaticResource AccentBgBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <TextBlock Text="{Binding InProcessCount}"
+                                                   HorizontalAlignment="Center"
+                                                   FontSize="{StaticResource FontSizeCaption2}" />
+                                    </Border>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+
+                        <DataGridTemplateColumn Header="Locked By" Width="120">
+                            <DataGridTemplateColumn.CellTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0">
+                                        <TextBlock Text="🔒"
+                                                   Visibility="{Binding IsLocked, Converter={StaticResource BoolToVis}}"
+                                                   Margin="0,0,4,0" />
+                                        <TextBlock Text="{Binding LockedBy}"
+                                                   Foreground="{StaticResource WarningBrush}"
+                                                   FontSize="{StaticResource FontSizeCaption2}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </DataGridTemplateColumn.CellTemplate>
+                        </DataGridTemplateColumn>
+                    </DataGrid.Columns>
+
+                    <DataGrid.ColumnHeaderStyle>
+                        <Style TargetType="DataGridColumnHeader">
+                            <Setter Property="Foreground" Value="{StaticResource Neutral600Brush}" />
+                            <Setter Property="FontWeight" Value="{StaticResource FontWeightSemibold}" />
+                            <Setter Property="FontSize" Value="{StaticResource FontSizeCaption2}" />
+                            <Setter Property="Padding" Value="8,6" />
+                            <Setter Property="Background" Value="{StaticResource NeutralBgBrush}" />
+                            <Setter Property="BorderBrush" Value="{StaticResource Neutral200Brush}" />
+                            <Setter Property="BorderThickness" Value="0,0,0,1" />
+                        </Style>
+                    </DataGrid.ColumnHeaderStyle>
+
+                    <DataGrid.RowStyle>
+                        <Style TargetType="DataGridRow">
+                            <Style.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Background" Value="{StaticResource Neutral100Brush}" />
+                                </Trigger>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter Property="Background" Value="{StaticResource PrimaryLightBrush}" />
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DataGrid.RowStyle>
+
+                    <DataGrid.CellStyle>
+                        <Style TargetType="DataGridCell">
+                            <Setter Property="BorderThickness" Value="0" />
+                            <Setter Property="Padding" Value="4" />
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="DataGridCell">
+                                        <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                                            <ContentPresenter VerticalAlignment="Center" />
+                                        </Border>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                            <Style.Triggers>
+                                <Trigger Property="IsSelected" Value="True">
+                                    <Setter Property="Background" Value="Transparent" />
+                                    <Setter Property="Foreground" Value="{StaticResource Neutral900Brush}" />
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </DataGrid.CellStyle>
+                </DataGrid>
+
+                <!-- Loading Overlay -->
+                <Border Visibility="{Binding IsLoading, Converter={StaticResource BoolToVis}}"
+                        Background="#80FFFFFF">
+                    <TextBlock Text="Loading..."
+                               FontSize="{StaticResource FontSizeBody1}"
+                               Foreground="{StaticResource Neutral500Brush}"
+                               HorizontalAlignment="Center"
+                               VerticalAlignment="Center" />
+                </Border>
+
+                <!-- Empty State -->
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center"
+                            Visibility="{Binding WorkflowCount, Converter={x:Static vm:WorkflowPage_Converters.ZeroToVisible}}">
+                    <TextBlock Text="No workflows found"
+                               FontSize="{StaticResource FontSizeBody2}"
+                               FontWeight="{StaticResource FontWeightMedium}"
+                               Foreground="{StaticResource Neutral400Brush}"
+                               HorizontalAlignment="Center" />
+                    <TextBlock Text="Create your first workflow from an Excel workbook"
+                               FontSize="{StaticResource FontSizeCaption2}"
+                               Foreground="{StaticResource Neutral400Brush}"
+                               HorizontalAlignment="Center"
+                               Margin="0,4,0,0" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- Workflow Count Footer -->
+        <TextBlock Grid.Row="3"
+                   Text="{Binding FilterInfo}"
+                   FontSize="{StaticResource FontSizeCaption2}"
+                   Foreground="{StaticResource Neutral500Brush}"
+                   Margin="0,6,0,0" />
+
+        <!-- Results Panel (shown after operations) -->
+        <controls:ResultsPanel Grid.Row="4"
+                               Visibility="{Binding ShowResults, Converter={StaticResource BoolToVis}}"
+                               Margin="0,12,0,0" />
+    </Grid>
+</UserControl>

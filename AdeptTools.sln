@@ -27,6 +27,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AdeptTools.Import", "src\Ad
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AdeptTools.Import.Tests", "tests\AdeptTools.Import.Tests\AdeptTools.Import.Tests.csproj", "{C8B80339-49B4-4ABE-ACB5-32BC18D49307}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AdeptTools.Launcher.Tests", "tests\AdeptTools.Launcher.Tests\AdeptTools.Launcher.Tests.csproj", "{3744198F-F61B-4257-AD91-29AAF1F7A2F1}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -76,6 +78,10 @@ Global
 		{C8B80339-49B4-4ABE-ACB5-32BC18D49307}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C8B80339-49B4-4ABE-ACB5-32BC18D49307}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C8B80339-49B4-4ABE-ACB5-32BC18D49307}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3744198F-F61B-4257-AD91-29AAF1F7A2F1}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3744198F-F61B-4257-AD91-29AAF1F7A2F1}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3744198F-F61B-4257-AD91-29AAF1F7A2F1}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3744198F-F61B-4257-AD91-29AAF1F7A2F1}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{CB976C38-C8F9-41B4-9835-FCDFEDD348D4} = {2B3A9B2E-5A29-45ED-AC17-95F908BF756D}
@@ -88,5 +94,6 @@ Global
 		{57DC9165-A502-4845-9071-414E96CB1294} = {692AB1EB-944C-493A-A46D-C96D6C199D41}
 		{30C81E11-8105-409F-A014-AF1E1679D28E} = {2B3A9B2E-5A29-45ED-AC17-95F908BF756D}
 		{C8B80339-49B4-4ABE-ACB5-32BC18D49307} = {692AB1EB-944C-493A-A46D-C96D6C199D41}
+		{3744198F-F61B-4257-AD91-29AAF1F7A2F1} = {692AB1EB-944C-493A-A46D-C96D6C199D41}
 	EndGlobalSection
 EndGlobal

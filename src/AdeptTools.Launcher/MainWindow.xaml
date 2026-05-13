@@ -20,10 +20,7 @@
             <views:TemplatePage />
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:WorkflowViewModel}">
-            <TextBlock Text="Workflows — coming soon"
-                       FontSize="{StaticResource FontSizeSubtitle1}"
-                       Foreground="{StaticResource Neutral400Brush}"
-                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+            <views:WorkflowPage />
         </DataTemplate>
         <DataTemplate DataType="{x:Type vm:ImportViewModel}">
             <TextBlock Text="Import — coming soon"

@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Reflection;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using AdeptTools.Launcher.Converters;
 using AdeptTools.Launcher.Services;
 
 namespace AdeptTools.Launcher.ViewModels;
@@ -22,7 +23,10 @@ public partial class MainViewModel : ObservableObject
 
     public ObservableCollection<NavItem> NavItems { get; }
 
-    public MainViewModel(INavigationService navigationService, MockModeState mockModeState)
+    public MainViewModel(
+        INavigationService navigationService,
+        MockModeState mockModeState,
+        ConnectViewModel connectViewModel)
     {
         _navigationService = navigationService;
         _mockModeState = mockModeState;
@@ -42,6 +46,20 @@ public partial class MainViewModel : ObservableObject
             CurrentPage = vm;
             foreach (var item in NavItems)
                 item.IsActive = item.ViewModelType == vm.GetType();
+        };
+
+        // Enable/disable feature pages based on connection status
+        connectViewModel.StatusChanged += (_, status) =>
+        {
+            var isConnected = status == ConnectionStatus.Connected;
+            foreach (var item in NavItems)
+            {
+                if (item.ViewModelType == typeof(WorkflowViewModel) ||
+                    item.ViewModelType == typeof(ImportViewModel))
+                {
+                    item.IsEnabled = isConnected;
+                }
+            }
         };
     }
 

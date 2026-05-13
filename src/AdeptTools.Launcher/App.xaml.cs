@@ -1,8 +1,13 @@
 using System.Windows;
 using AdeptTools.Backend.Http.Auth;
+using AdeptTools.Backend.Http.Api;
 using AdeptTools.Core.Auth;
 using AdeptTools.Launcher.Services;
 using AdeptTools.Launcher.ViewModels;
+using AdeptTools.Workflow.Api;
+using AdeptTools.Workflow.Input;
+using AdeptTools.Workflow.Services;
+using AdeptTools.Workflow.Validation;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AdeptTools.Launcher;
@@ -39,13 +44,38 @@ public partial class App : Application
                 : sp.GetRequiredService<HttpAdeptAuthService>();
         });
 
+        // Workflow services — returns mock or HTTP based on runtime toggle
+        services.AddSingleton<MockWorkflowApiClient>();
+        services.AddHttpClient<HttpWorkflowApiClient>();
+        services.AddSingleton<Func<IWorkflowApiClient>>(sp =>
+        {
+            return () => sp.GetRequiredService<MockModeState>().IsMock
+                ? sp.GetRequiredService<MockWorkflowApiClient>()
+                : sp.GetRequiredService<HttpWorkflowApiClient>();
+        });
+        services.AddTransient<WorkflowExcelReader>();
+        services.AddTransient<WorkflowXmlReader>();
+        services.AddTransient<WorkflowValidator>();
+        services.AddSingleton<Func<IWorkflowService>>(sp =>
+        {
+            return () =>
+            {
+                var apiClient = sp.GetRequiredService<Func<IWorkflowApiClient>>()();
+                return new WorkflowService(
+                    apiClient,
+                    sp.GetRequiredService<WorkflowExcelReader>(),
+                    sp.GetRequiredService<WorkflowXmlReader>(),
+                    sp.GetRequiredService<WorkflowValidator>());
+            };
+        });
+
         // Navigation
         services.AddSingleton<INavigationService, NavigationService>();
         services.AddSingleton<IDialogService, DialogService>();
 
         // ViewModels
         services.AddSingleton<MainViewModel>();
-        services.AddTransient<ConnectViewModel>();
+        services.AddSingleton<ConnectViewModel>();
         services.AddTransient<TemplateViewModel>();
         services.AddTransient<WorkflowViewModel>();
         services.AddTransient<ImportViewModel>();
