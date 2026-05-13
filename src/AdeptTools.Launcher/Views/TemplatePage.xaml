@@ -83,10 +83,22 @@
                             BorderThickness="1"
                             CornerRadius="{StaticResource RadiusDefault}"
                             Padding="12" Margin="0,4,0,0">
-                        <TextBlock Text="{Binding ResultMessage}"
-                                   FontSize="{StaticResource FontSizeBody1}"
-                                   Foreground="{StaticResource SuccessTextBrush}"
-                                   TextWrapping="Wrap" />
+                        <StackPanel>
+                            <TextBlock Text="{Binding ResultMessage}"
+                                       FontSize="{StaticResource FontSizeBody1}"
+                                       Foreground="{StaticResource SuccessTextBrush}"
+                                       TextWrapping="Wrap"
+                                       Margin="0,0,0,12" />
+                            <StackPanel Orientation="Horizontal">
+                                <Button Content="Open in Excel"
+                                        Command="{Binding OpenInExcelCommand}"
+                                        Style="{StaticResource PrimaryButtonStyle}"
+                                        Margin="0,0,8,0" />
+                                <Button Content="Open Folder"
+                                        Command="{Binding OpenFolderCommand}"
+                                        Style="{StaticResource SecondaryButtonStyle}" />
+                            </StackPanel>
+                        </StackPanel>
                     </Border>
 
                     <!-- Result Message (error) -->

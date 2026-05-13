@@ -3,6 +3,7 @@ using System.CommandLine.Invocation;
 using AdeptTools.Core.Api;
 using AdeptTools.Core.Auth;
 using AdeptTools.Core.Configuration;
+using AdeptTools.Core.Models;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace AdeptTools.Cli.Commands;
@@ -36,15 +37,29 @@ public static class AuthCommands
 
             // Determine credentials
             string userName;
-            string password;
+            string password = string.Empty;
 
             if (settings.MockMode)
             {
                 userName = "MockUser";
                 password = "mock";
             }
+            else if (settings.Backend == BackendType.Http)
+            {
+                // HTTP uses SSO — no password needed, browser will open
+                userName = settings.UserName ?? "ADM";
+
+                if (string.IsNullOrEmpty(settings.UserName))
+                {
+                    Console.Write("  User:       ");
+                    userName = Console.ReadLine() ?? "ADM";
+                }
+
+                Console.WriteLine("  Auth:       SSO (opening browser...)");
+            }
             else
             {
+                // COM backend — prompt for credentials
                 userName = settings.UserName ?? "ADM";
 
                 if (string.IsNullOrEmpty(settings.UserName))

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using AdeptTools.Launcher.Services;
@@ -79,5 +80,25 @@ public partial class TemplateViewModel : ObservableObject
         {
             IsGenerating = false;
         }
+    }
+
+    [RelayCommand]
+    private void OpenInExcel()
+    {
+        if (string.IsNullOrWhiteSpace(OutputPath) || !System.IO.File.Exists(OutputPath))
+            return;
+
+        Process.Start(new ProcessStartInfo(OutputPath) { UseShellExecute = true });
+    }
+
+    [RelayCommand]
+    private void OpenFolder()
+    {
+        if (string.IsNullOrWhiteSpace(OutputPath))
+            return;
+
+        var folder = System.IO.Path.GetDirectoryName(OutputPath);
+        if (folder is not null && System.IO.Directory.Exists(folder))
+            Process.Start(new ProcessStartInfo("explorer.exe", folder) { UseShellExecute = true });
     }
 }

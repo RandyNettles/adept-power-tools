@@ -94,10 +94,7 @@ public partial class ConnectViewModel : ObservableObject
             var url = IsMockMode ? "mock://localhost" : ServerUrl;
             var user = IsMockMode ? "mock-user" : UserName;
 
-            // PasswordBox doesn't support binding — password is passed via code-behind
-            var password = _password ?? string.Empty;
-
-            var result = await authService.LoginAsync(url, user, password);
+            var result = await authService.LoginAsync(url, user);
 
             if (result.Success)
             {
@@ -120,10 +117,6 @@ public partial class ConnectViewModel : ObservableObject
             ErrorMessage = ex.Message;
         }
     }
-
-    // Password is set from code-behind (PasswordBox doesn't support binding)
-    private string? _password;
-    public void SetPassword(string? password) => _password = password;
 
     private void ResetConnectionStatus()
     {
