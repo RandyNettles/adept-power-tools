@@ -212,6 +212,20 @@ public partial class WorkflowViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanDeleteSelected))]
     public async Task DeleteSelectedAsync()
     {
+        try
+        {
+            await DeleteSelectedCoreAsync();
+        }
+        catch (Exception ex)
+        {
+            System.Windows.MessageBox.Show(
+                $"Delete failed:\n\n{ex.GetType().Name}: {ex.Message}\n\n{ex.StackTrace}",
+                "Delete Error", System.Windows.MessageBoxButton.OK, System.Windows.MessageBoxImage.Error);
+        }
+    }
+
+    private async Task DeleteSelectedCoreAsync()
+    {
         var selected = Workflows.Where(w => w.IsSelected).ToList();
         if (selected.Count == 0) return;
 
@@ -240,12 +254,26 @@ public partial class WorkflowViewModel : ObservableObject
             return;
         }
 
+        // For dry run, report results locally without calling the server
+        if (isDryRun)
+        {
+            ShowResults = true;
+            foreach (var wf in dialogVm.DeletableWorkflows)
+            {
+                ResultItems.Add(new ResultItem(ResultStatus.Ok,
+                    $"DRY RUN — Would delete: {wf.Name} ({wf.InProcessCount} in-process)"));
+            }
+            ResultItems.Add(new ResultItem(ResultStatus.Ok,
+                $"DRY RUN — Summary: {dialogVm.DeletableWorkflows.Count} workflow(s) would be deleted."));
+            return;
+        }
+
         await RunOperationAsync(async (service, progress, ct) =>
         {
             var request = new WorkflowDeleteRequest
             {
                 Filter = string.Join("|", deletableIds),
-                DryRun = isDryRun
+                DryRun = false
             };
             return await service.DeleteAsync(request, progress, ct);
         }, "Deleting");

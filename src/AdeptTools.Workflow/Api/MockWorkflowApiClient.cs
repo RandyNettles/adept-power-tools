@@ -121,8 +121,32 @@ public class MockWorkflowApiClient : IWorkflowApiClient
     {
         var newStepId = Guid.NewGuid().ToString("N")[..8];
         var wfId = model.WorkflowDefinition.WorkflowId;
-        var newOrder = model.WorkflowStepModels.Count + 1;
 
+        // Replicate COM behavior: returns a fresh model re-read from the server.
+        // Only structural data (step IDs, order, names) is preserved — in-memory
+        // changes to trustees and workflow-level properties are discarded.
+        var updatedModel = new WorkflowEditModel
+        {
+            BEditable = model.BEditable,
+            WorkflowDefinition = new WorkflowDefinition
+            {
+                WorkflowId = wfId,
+                Name = model.WorkflowDefinition.Name
+            },
+            WorkflowStepModels = model.WorkflowStepModels.Select(s => new WorkflowStepModel
+            {
+                WorkflowStepDefinition = new WorkflowStepDefinition
+                {
+                    WorkflowId = wfId,
+                    StepId = s.WorkflowStepDefinition.StepId,
+                    Order = s.WorkflowStepDefinition.Order,
+                    Name = s.WorkflowStepDefinition.Name
+                },
+                WorkflowTrusteeDefinitions = new List<WorkflowTrusteeDefinition>()
+            }).ToList()
+        };
+
+        var newOrder = updatedModel.WorkflowStepModels.Count + 1;
         var newStep = new WorkflowStepModel
         {
             WorkflowStepDefinition = new WorkflowStepDefinition
@@ -131,14 +155,15 @@ public class MockWorkflowApiClient : IWorkflowApiClient
                 StepId = newStepId,
                 Order = newOrder,
                 Name = $"Step {newOrder}"
-            }
+            },
+            WorkflowTrusteeDefinitions = new List<WorkflowTrusteeDefinition>()
         };
 
-        model.WorkflowStepModels.Add(newStep);
-        model.EAddStep = newStep;
-        model.EStepId = newStepId;
+        updatedModel.WorkflowStepModels.Add(newStep);
+        updatedModel.EAddStep = newStep;
+        updatedModel.EStepId = newStepId;
 
-        return Task.FromResult(model);
+        return Task.FromResult(updatedModel);
     }
 
     public virtual Task<WorkflowEditModel> TagAsync(string workflowId, CancellationToken ct = default)

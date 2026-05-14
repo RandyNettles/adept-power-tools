@@ -48,9 +48,11 @@
                                    FontWeight="{StaticResource FontWeightMedium}"
                                    Foreground="{StaticResource Neutral600Brush}"
                                    Margin="0,0,0,6" />
-                        <TextBox Text="{Binding ServerUrl, UpdateSourceTrigger=PropertyChanged}"
-                                 Style="{StaticResource DefaultTextBoxStyle}"
-                                 Margin="0,0,0,4" />
+                        <ComboBox IsEditable="True"
+                                  Text="{Binding ServerUrl, UpdateSourceTrigger=PropertyChanged}"
+                                  ItemsSource="{Binding ServerUrlHistory}"
+                                  Style="{StaticResource DefaultComboBoxStyle}"
+                                  Margin="0,0,0,4" />
                         <TextBlock Text="e.g. https://server.company.com/synergis.webapi"
                                    FontSize="{StaticResource FontSizeCaption2}"
                                    Foreground="{StaticResource Neutral400Brush}"

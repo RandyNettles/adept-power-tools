@@ -1,3 +1,4 @@
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using AdeptTools.Core.Auth;
@@ -11,6 +12,8 @@ public partial class ConnectViewModel : ObservableObject
 {
     private readonly Func<IAdeptAuthService> _authServiceFactory;
     private readonly MockModeState _mockModeState;
+    private readonly HttpClientConfig _httpClientConfig;
+    private readonly ServerHistoryService _serverHistory;
     private string _password = string.Empty;
 
     public void SetPassword(string password) => _password = password;
@@ -50,11 +53,22 @@ public partial class ConnectViewModel : ObservableObject
 
     public bool ShowHttpFields => SelectedBackend == BackendType.Http && !IsMockMode;
 
-    public ConnectViewModel(Func<IAdeptAuthService> authServiceFactory, MockModeState mockModeState)
+    public ObservableCollection<string> ServerUrlHistory { get; } = new();
+
+    public ConnectViewModel(Func<IAdeptAuthService> authServiceFactory, MockModeState mockModeState, HttpClientConfig httpClientConfig, ServerHistoryService serverHistory)
     {
         _authServiceFactory = authServiceFactory;
         _mockModeState = mockModeState;
+        _httpClientConfig = httpClientConfig;
+        _serverHistory = serverHistory;
         _isMockMode = _mockModeState.IsMock;
+
+        _serverHistory.Load();
+        foreach (var url in _serverHistory.Entries)
+            ServerUrlHistory.Add(url);
+
+        if (ServerUrlHistory.Count > 0)
+            _serverUrl = ServerUrlHistory[0];
 
         _mockModeState.Changed += (_, isMock) =>
         {
@@ -105,6 +119,19 @@ public partial class ConnectViewModel : ObservableObject
                 StatusText = "Connected";
                 DisplayName = result.DisplayName ?? result.UserName;
                 ServerVersion = result.AppVersion;
+
+                // Store connection info for API clients
+                _httpClientConfig.BaseUrl = url.TrimEnd('/') + "/";
+                _httpClientConfig.AccessToken = result.AccessToken;
+
+                // Remember successful server URL
+                if (!IsMockMode)
+                {
+                    _serverHistory.Add(url);
+                    ServerUrlHistory.Clear();
+                    foreach (var entry in _serverHistory.Entries)
+                        ServerUrlHistory.Add(entry);
+                }
             }
             else
             {

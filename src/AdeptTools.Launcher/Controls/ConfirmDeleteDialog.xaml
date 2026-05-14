@@ -86,13 +86,7 @@
                        Foreground="{StaticResource WarningTextBrush}">
                 <Run Text="⚠ WARNING" FontWeight="{StaticResource FontWeightSemibold}" />
                 <LineBreak />
-                <Run>
-                    <Run.Text>
-                        <MultiBinding StringFormat="{}{0} documents currently in-process will be moved to the System Workflow and will need to be manually reassigned.">
-                            <Binding Path="TotalInProcessCount" />
-                        </MultiBinding>
-                    </Run.Text>
-                </Run>
+                <Run Text="{Binding TotalInProcessCount, Mode=OneWay, StringFormat='{}{0} documents currently in-process will be moved to the System Workflow and will need to be manually reassigned.'}" />
             </TextBlock>
         </Border>
 

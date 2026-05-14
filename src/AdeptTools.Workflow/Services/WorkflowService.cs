@@ -106,7 +106,14 @@ public class WorkflowService : IWorkflowService
             var model = await _apiClient.CreateNewAsync(ct);
             workflowId = model.WorkflowDefinition.WorkflowId;
 
-            // 2. Set workflow-level properties
+            // 2. Add all additional steps first (each call re-reads the model from the server,
+            //    discarding in-memory changes, so we must add all steps before configuring any)
+            for (int s = 1; s < input.Steps.Count; s++)
+            {
+                model = await _apiClient.AddStepAsync(model, -1, ct);
+            }
+
+            // 3. Set workflow-level properties (after all re-reads)
             model.WorkflowDefinition.Name = input.Name;
             model.WorkflowDefinition.Memo = input.Memo;
 
@@ -125,19 +132,10 @@ public class WorkflowService : IWorkflowService
             model.WorkflowDefinition.BTimeoutIncludeSaturday = !input.ExcludeSaturday;
             model.WorkflowDefinition.BTimeoutIncludeSunday = !input.ExcludeSunday;
 
-            // 3. Configure first step (already exists)
-            if (input.Steps.Count > 0 && model.WorkflowStepModels.Count > 0)
+            // 4. Configure all steps (after final model is stable)
+            for (int s = 0; s < input.Steps.Count && s < model.WorkflowStepModels.Count; s++)
             {
-                ConfigureStep(model.WorkflowStepModels[0], input.Steps[0], workflowId);
-            }
-
-            // 4. Add additional steps
-            for (int s = 1; s < input.Steps.Count; s++)
-            {
-                model = await _apiClient.AddStepAsync(model, -1, ct);
-
-                var addedStep = model.WorkflowStepModels[^1];
-                ConfigureStep(addedStep, input.Steps[s], workflowId);
+                ConfigureStep(model.WorkflowStepModels[s], input.Steps[s], workflowId);
             }
 
             // 5. Save
@@ -275,7 +273,14 @@ public class WorkflowService : IWorkflowService
             // Get current state
             var model = await _apiClient.GetWorkflowAsync(workflowId, ct);
 
-            // Update workflow-level properties
+            // Add new steps if input has more (each call re-reads the model,
+            // so we must add all steps before configuring any)
+            for (int s = model.WorkflowStepModels.Count; s < input.Steps.Count; s++)
+            {
+                model = await _apiClient.AddStepAsync(model, -1, ct);
+            }
+
+            // Apply workflow-level properties (after AddStepAsync re-reads)
             model.WorkflowDefinition.Memo = input.Memo;
 
             if (input.TimeoutDays.HasValue)
@@ -293,17 +298,10 @@ public class WorkflowService : IWorkflowService
             model.WorkflowDefinition.BTimeoutIncludeSaturday = !input.ExcludeSaturday;
             model.WorkflowDefinition.BTimeoutIncludeSunday = !input.ExcludeSunday;
 
-            // Update steps — match by position
+            // Configure all steps (after final model is stable)
             for (int s = 0; s < input.Steps.Count && s < model.WorkflowStepModels.Count; s++)
             {
                 ConfigureStep(model.WorkflowStepModels[s], input.Steps[s], workflowId);
-            }
-
-            // Add new steps if input has more
-            for (int s = model.WorkflowStepModels.Count; s < input.Steps.Count; s++)
-            {
-                model = await _apiClient.AddStepAsync(model, -1, ct);
-                ConfigureStep(model.WorkflowStepModels[^1], input.Steps[s], workflowId);
             }
 
             // Save

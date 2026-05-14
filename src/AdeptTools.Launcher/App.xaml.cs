@@ -23,6 +23,36 @@ public partial class App : Application
     {
         base.OnStartup(e);
 
+        DispatcherUnhandledException += (_, args) =>
+        {
+            MessageBox.Show(
+                $"Unhandled exception:\n\n{args.Exception.GetType().Name}: {args.Exception.Message}\n\n{args.Exception.StackTrace}",
+                "Adept Tools — Crash Report",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            args.Handled = true;
+        };
+
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            if (args.ExceptionObject is Exception ex)
+                MessageBox.Show(
+                    $"Fatal exception:\n\n{ex.GetType().Name}: {ex.Message}\n\n{ex.StackTrace}",
+                    "Adept Tools — Fatal Error",
+                    MessageBoxButton.OK,
+                    MessageBoxImage.Error);
+        };
+
+        System.Threading.Tasks.TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            MessageBox.Show(
+                $"Unobserved task exception:\n\n{args.Exception.InnerException?.Message ?? args.Exception.Message}\n\n{args.Exception.InnerException?.StackTrace ?? args.Exception.StackTrace}",
+                "Adept Tools — Task Error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+            args.SetObserved();
+        };
+
         var services = new ServiceCollection();
         ConfigureServices(services);
         _serviceProvider = services.BuildServiceProvider();
@@ -36,6 +66,9 @@ public partial class App : Application
         // Shared state
         var mockModeState = new MockModeState();
         services.AddSingleton(mockModeState);
+        var httpClientConfig = new HttpClientConfig();
+        services.AddSingleton(httpClientConfig);
+        services.AddSingleton<ServerHistoryService>();
 
         // Auth service factory — returns mock or HTTP based on runtime toggle
         services.AddSingleton<MockAdeptAuthService>();
@@ -49,7 +82,14 @@ public partial class App : Application
 
         // Workflow services — returns mock or HTTP based on runtime toggle
         services.AddSingleton<MockWorkflowApiClient>();
-        services.AddHttpClient<HttpWorkflowApiClient>();
+        services.AddHttpClient<HttpWorkflowApiClient>(client =>
+        {
+            if (!string.IsNullOrEmpty(httpClientConfig.BaseUrl))
+                client.BaseAddress = new Uri(httpClientConfig.BaseUrl);
+            if (!string.IsNullOrEmpty(httpClientConfig.AccessToken))
+                client.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", httpClientConfig.AccessToken);
+        });
         services.AddSingleton<Func<IWorkflowApiClient>>(sp =>
         {
             return () => sp.GetRequiredService<MockModeState>().IsMock
@@ -74,7 +114,14 @@ public partial class App : Application
 
         // Import services — returns mock or HTTP based on runtime toggle
         services.AddSingleton<MockImportApiClient>();
-        services.AddHttpClient<HttpImportApiClient>();
+        services.AddHttpClient<HttpImportApiClient>(client =>
+        {
+            if (!string.IsNullOrEmpty(httpClientConfig.BaseUrl))
+                client.BaseAddress = new Uri(httpClientConfig.BaseUrl);
+            if (!string.IsNullOrEmpty(httpClientConfig.AccessToken))
+                client.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", httpClientConfig.AccessToken);
+        });
         services.AddSingleton<Func<IImportApiClient>>(sp =>
         {
             return () => sp.GetRequiredService<MockModeState>().IsMock
