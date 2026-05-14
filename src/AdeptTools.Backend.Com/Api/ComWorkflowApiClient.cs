@@ -2,6 +2,7 @@ using AdeptTools.Backend.Com.Infrastructure;
 using AdeptTools.Backend.Com.Interop;
 using AdeptTools.Core.Models;
 using AdeptTools.Workflow.Api;
+using AdeptTools.Workflow.Input;
 using AdeptTools.Workflow.Models;
 
 namespace AdeptTools.Backend.Com.Api;
@@ -265,6 +266,13 @@ public class ComWorkflowApiClient : IWorkflowApiClient
 
             return metagroups;
         }, ct);
+    }
+
+    public Task<List<AdeptUserEntry>> GetUsersAsync(CancellationToken ct = default)
+    {
+        // COM SDK does not expose user enumeration. This operation requires the HTTP backend.
+        throw new NotSupportedException(
+            "User list retrieval is not supported via COM. Use the HTTP backend for name resolution.");
     }
 
     private static WorkflowEditModel MapWorkflowToEditModel(INxWorkflow nxWf)

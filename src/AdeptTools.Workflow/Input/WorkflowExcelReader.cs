@@ -1,4 +1,3 @@
-using System.Text.RegularExpressions;
 using AdeptTools.Workflow.Models;
 using OfficeOpenXml;
 
@@ -6,10 +5,6 @@ namespace AdeptTools.Workflow.Input;
 
 public class WorkflowExcelReader
 {
-    private static readonly Regex TrusteeHeaderRegex = new(@"^Trustee\s+(\d+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex TypeHeaderRegex = new(@"^Type\s+(\d+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex RoleHeaderRegex = new(@"^Role\s+(\d+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
     public WorkflowExcelInput Read(string filePath)
     {
         ExcelPackage.LicenseContext = LicenseContext.NonCommercial;
@@ -64,68 +59,78 @@ public class WorkflowExcelReader
         if (headers.Count == 0)
             return model;
 
-        // Find column indices
+        // Find column indices for the vertical layout
         int stepNameCol = FindColumn(headers, "Step Name");
         int approvalsCol = FindColumn(headers, "Approvals Required");
         int autoAdvanceCol = FindColumn(headers, "Auto Advance");
+        int trusteeCol = FindColumn(headers, "Trustee");
+        int typeCol = FindColumn(headers, "Type");
+        int roleCol = FindColumn(headers, "Role");
 
-        // Find trustee/type/role column groups
-        var trusteeGroups = FindTrusteeGroups(headers);
+        // Read rows using vertical sub-table logic:
+        // A new step begins when the Step Name cell is non-empty.
+        // Subsequent rows with empty Step Name belong to the preceding step (trustee rows).
+        WorkflowInputStep? currentStep = null;
+        var dataStart = headerRow + 1;
+        var lastRow = sheet.Dimension?.End.Row ?? dataStart;
 
-        // Read step rows starting at row 8
-        var row = headerRow + 1;
-        while (row <= sheet.Dimension?.End.Row)
+        for (int row = dataStart; row <= lastRow; row++)
         {
             var stepNameText = stepNameCol >= 0 ? GetCellText(sheet, row, stepNameCol) : null;
-            if (string.IsNullOrWhiteSpace(stepNameText))
-                break;
 
-            var step = new WorkflowInputStep
+            if (!string.IsNullOrWhiteSpace(stepNameText))
             {
-                Name = stepNameText
-            };
+                // New step boundary
+                currentStep = new WorkflowInputStep
+                {
+                    Name = stepNameText
+                };
 
-            if (approvalsCol >= 0)
-            {
-                var approvalsText = GetCellText(sheet, row, approvalsCol);
-                if (int.TryParse(approvalsText, out var approvals))
-                    step.RequiredApprovalsCount = approvals;
+                if (approvalsCol >= 0)
+                {
+                    var approvalsText = GetCellText(sheet, row, approvalsCol);
+                    if (int.TryParse(approvalsText, out var approvals))
+                        currentStep.RequiredApprovalsCount = approvals;
+                }
+
+                if (autoAdvanceCol >= 0)
+                {
+                    currentStep.AutoAdvance = ParseBool(GetCellText(sheet, row, autoAdvanceCol), defaultValue: false);
+                }
+
+                model.Steps.Add(currentStep);
             }
 
-            if (autoAdvanceCol >= 0)
+            if (currentStep is null)
+                continue;
+
+            // Read trustee from this row (applies to both step rows and continuation rows)
+            if (trusteeCol < 0)
+                continue;
+
+            var trusteeValue = GetCellText(sheet, row, trusteeCol);
+            if (string.IsNullOrWhiteSpace(trusteeValue))
+                continue;
+
+            var typeText = typeCol >= 0 ? GetCellText(sheet, row, typeCol) : string.Empty;
+            var roleText = roleCol >= 0 ? GetCellText(sheet, row, roleCol) : string.Empty;
+
+            // Comma-delimited split
+            var trusteeIds = TrusteeParser.Split(trusteeValue);
+            foreach (var id in trusteeIds)
             {
-                step.AutoAdvance = ParseBool(GetCellText(sheet, row, autoAdvanceCol), defaultValue: false);
-            }
-
-            // Read trustees
-            foreach (var (trusteeCol, typeCol, roleCol) in trusteeGroups)
-            {
-                var trusteeId = GetCellText(sheet, row, trusteeCol);
-                var typeText = GetCellText(sheet, row, typeCol);
-
-                if (string.IsNullOrWhiteSpace(trusteeId))
-                    continue;
-
                 if (TrusteeTypeMapper.TryMap(typeText, out var trusteeType))
                 {
-                    var role = TrusteeRole.Reviewer;
-                    if (roleCol >= 0)
-                    {
-                        var roleText = GetCellText(sheet, row, roleCol);
-                        TrusteeTypeMapper.TryMapRole(roleText, out role);
-                    }
+                    TrusteeTypeMapper.TryMapRole(roleText, out var role);
 
-                    step.Trustees.Add(new WorkflowInputTrustee
+                    currentStep.Trustees.Add(new WorkflowInputTrustee
                     {
-                        TrusteeId = trusteeId,
+                        TrusteeId = id,
                         TrusteeType = trusteeType,
                         Role = role
                     });
                 }
             }
-
-            model.Steps.Add(step);
-            row++;
         }
 
         return model;
@@ -154,48 +159,6 @@ public class WorkflowExcelReader
                 return col;
         }
         return -1;
-    }
-
-    private static List<(int TrusteeCol, int TypeCol, int RoleCol)> FindTrusteeGroups(Dictionary<int, string> headers)
-    {
-        var trusteeColumns = new Dictionary<int, int>(); // number → column
-        var typeColumns = new Dictionary<int, int>();     // number → column
-        var roleColumns = new Dictionary<int, int>();     // number → column
-
-        foreach (var (col, header) in headers)
-        {
-            var trusteeMatch = TrusteeHeaderRegex.Match(header);
-            if (trusteeMatch.Success)
-            {
-                trusteeColumns[int.Parse(trusteeMatch.Groups[1].Value)] = col;
-                continue;
-            }
-
-            var typeMatch = TypeHeaderRegex.Match(header);
-            if (typeMatch.Success)
-            {
-                typeColumns[int.Parse(typeMatch.Groups[1].Value)] = col;
-                continue;
-            }
-
-            var roleMatch = RoleHeaderRegex.Match(header);
-            if (roleMatch.Success)
-            {
-                roleColumns[int.Parse(roleMatch.Groups[1].Value)] = col;
-            }
-        }
-
-        var groups = new List<(int, int, int)>();
-        foreach (var (number, trusteeCol) in trusteeColumns.OrderBy(kv => kv.Key))
-        {
-            if (typeColumns.TryGetValue(number, out var typeCol))
-            {
-                var roleCol = roleColumns.TryGetValue(number, out var rc) ? rc : -1;
-                groups.Add((trusteeCol, typeCol, roleCol));
-            }
-        }
-
-        return groups;
     }
 
     private static string GetCellText(ExcelWorksheet sheet, int row, int col)

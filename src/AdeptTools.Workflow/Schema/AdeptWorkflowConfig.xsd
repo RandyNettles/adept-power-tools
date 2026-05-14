@@ -39,6 +39,15 @@
                                               </xs:restriction>
                                             </xs:simpleType>
                                           </xs:attribute>
+                                          <xs:attribute name="Role" default="Reviewer">
+                                            <xs:simpleType>
+                                              <xs:restriction base="xs:string">
+                                                <xs:enumeration value="Reviewer" />
+                                                <xs:enumeration value="Notify" />
+                                                <xs:enumeration value="Alert" />
+                                              </xs:restriction>
+                                            </xs:simpleType>
+                                          </xs:attribute>
                                         </xs:complexType>
                                       </xs:element>
                                     </xs:sequence>

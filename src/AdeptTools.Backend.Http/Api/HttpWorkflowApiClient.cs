@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using AdeptTools.Core.Models;
 using AdeptTools.Workflow.Api;
+using AdeptTools.Workflow.Input;
 using AdeptTools.Workflow.Models;
 
 namespace AdeptTools.Backend.Http.Api;
@@ -96,5 +97,12 @@ public class HttpWorkflowApiClient : IWorkflowApiClient
         var response = await _httpClient.GetAsync("api/admin/workflow/metagroups/true", ct);
         response.EnsureSuccessStatusCode();
         return await response.Content.ReadFromJsonAsync<List<WorkflowCommonTarget>>(JsonOptions, ct) ?? new List<WorkflowCommonTarget>();
+    }
+
+    public async Task<List<AdeptUserEntry>> GetUsersAsync(CancellationToken ct = default)
+    {
+        var response = await _httpClient.GetAsync("api/admin/user/users", ct);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<List<AdeptUserEntry>>(JsonOptions, ct) ?? new List<AdeptUserEntry>();
     }
 }

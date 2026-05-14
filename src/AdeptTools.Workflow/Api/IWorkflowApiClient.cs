@@ -1,4 +1,5 @@
 using AdeptTools.Core.Models;
+using AdeptTools.Workflow.Input;
 using AdeptTools.Workflow.Models;
 
 namespace AdeptTools.Workflow.Api;
@@ -16,4 +17,5 @@ public interface IWorkflowApiClient
     Task<WorkflowEditModel> TagAsync(string workflowId, CancellationToken ct = default);
     Task<ApiResult> UntagAsync(string workflowId, CancellationToken ct = default);
     Task<List<WorkflowCommonTarget>> GetMetagroupsAsync(CancellationToken ct = default);
+    Task<List<AdeptUserEntry>> GetUsersAsync(CancellationToken ct = default);
 }

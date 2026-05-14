@@ -115,70 +115,102 @@ public partial class TemplateViewModel : ObservableObject
         config.Column(1).Width = 16;
         config.Column(2).Width = 40;
 
-        // Template workflow sheet
-        var wf = package.Workbook.Worksheets.Add("WF-_Template");
-        wf.Cells[1, 1].Value = "Workflow Name:";
-        wf.Cells[1, 2].Value = "(rename this sheet to WF-YourWorkflowName)";
-        wf.Cells[3, 1].Value = "Memo:";
-        wf.Cells[4, 1].Value = "Deadline (days):";
-        wf.Cells[5, 1].Value = "Active:";
-        wf.Cells[5, 2].Value = "true";
+            // Template workflow sheet — vertical sub-table layout
+            var wf = package.Workbook.Worksheets.Add("WF-_Template");
+            wf.Cells[1, 1].Value = "Workflow Name:";
+            wf.Cells[1, 2].Value = "(rename this sheet to WF-YourWorkflowName)";
+            wf.Cells[3, 1].Value = "Memo:";
+            wf.Cells[4, 1].Value = "Deadline (days):";
+            wf.Cells[5, 1].Value = "Active:";
+            wf.Cells[5, 2].Value = "true";
 
-        // Step table headers at row 7
-        wf.Cells[7, 1].Value = "Step Name";
-        wf.Cells[7, 2].Value = "Approvals Required";
-        wf.Cells[7, 3].Value = "Auto Advance";
-        wf.Cells[7, 4].Value = "Trustee 1";
-        wf.Cells[7, 5].Value = "Type 1";
-        wf.Cells[7, 6].Value = "Role 1";
-        wf.Cells[7, 7].Value = "Trustee 2";
-        wf.Cells[7, 8].Value = "Type 2";
-        wf.Cells[7, 9].Value = "Role 2";
+            // Step table headers at row 7 — vertical layout (6 columns)
+            wf.Cells[7, 1].Value = "Step Name";
+            wf.Cells[7, 2].Value = "Approvals Required";
+            wf.Cells[7, 3].Value = "Auto Advance";
+            wf.Cells[7, 4].Value = "Trustee";
+            wf.Cells[7, 5].Value = "Type";
+            wf.Cells[7, 6].Value = "Role";
 
-        // Example row
-        wf.Cells[8, 1].Value = "Review";
-        wf.Cells[8, 2].Value = 1;
-        wf.Cells[8, 3].Value = "false";
-        wf.Cells[8, 4].Value = "jsmith";
-        wf.Cells[8, 5].Value = "User";
-        wf.Cells[8, 6].Value = "Reviewer";
-        wf.Cells[8, 7].Value = "eng-managers";
-        wf.Cells[8, 8].Value = "Group";
-        wf.Cells[8, 9].Value = "Notify";
+            // Example: Step 1 with multiple trustees (vertical rows)
+            wf.Cells[8, 1].Value = "Draft";
+            wf.Cells[8, 2].Value = 0;
+            wf.Cells[8, 3].Value = "false";
+            wf.Cells[8, 4].Value = "jsmith";
+            wf.Cells[8, 5].Value = "User";
+            wf.Cells[8, 6].Value = "Reviewer";
+            // Continuation row (same step, additional trustee)
+            wf.Cells[9, 4].Value = "eng-managers";
+            wf.Cells[9, 5].Value = "Group";
+            wf.Cells[9, 6].Value = "Notify";
 
-        // Formatting
-        using (var range = wf.Cells[7, 1, 7, 9])
-        {
-            range.Style.Font.Bold = true;
+            // Example: Step 2 with trustees
+            wf.Cells[10, 1].Value = "Review";
+            wf.Cells[10, 2].Value = 2;
+            wf.Cells[10, 3].Value = "true";
+            wf.Cells[10, 4].Value = "mjones";
+            wf.Cells[10, 5].Value = "User";
+            wf.Cells[10, 6].Value = "Reviewer";
+            wf.Cells[11, 4].Value = "akhan";
+            wf.Cells[11, 5].Value = "User";
+            wf.Cells[11, 6].Value = "Reviewer";
+            wf.Cells[11, 4].Value = "pm-notify";
+            wf.Cells[11, 5].Value = "Group";
+            wf.Cells[11, 6].Value = "Alert";
+
+            // Example: Terminal step with no trustees
+            wf.Cells[12, 1].Value = "Approved";
+            wf.Cells[12, 2].Value = 0;
+            wf.Cells[12, 3].Value = "false";
+
+            // Data validation: Type dropdown
+            var typeValidation = wf.DataValidations.AddListValidation("E8:E100");
+            typeValidation.Formula.Values.Add("User");
+            typeValidation.Formula.Values.Add("Group");
+            typeValidation.Formula.Values.Add("Meta");
+            typeValidation.Formula.Values.Add("Email");
+
+            // Data validation: Role dropdown
+            var roleValidation = wf.DataValidations.AddListValidation("F8:F100");
+            roleValidation.Formula.Values.Add("Reviewer");
+            roleValidation.Formula.Values.Add("Notify");
+            roleValidation.Formula.Values.Add("Alert");
+
+            // Formatting
+            using (var range = wf.Cells[7, 1, 7, 6])
+            {
+                range.Style.Font.Bold = true;
+            }
+            wf.Column(1).Width = 20;
+            wf.Column(2).Width = 20;
+            wf.Column(3).Width = 14;
+            wf.Column(4).Width = 20;
+            wf.Column(5).Width = 10;
+            wf.Column(6).Width = 12;
+
+            // Instructions row
+            wf.Cells[14, 1].Value = "Each group of rows is a workflow step. The first row of a group defines the step (Step Name + settings). " +
+                "Subsequent rows add trustees to that step. Leave Trustee blank on the step row if the step has no trustees. " +
+                "A cell may contain multiple comma-separated IDs sharing the same Type and Role.";
         }
-        wf.Column(1).Width = 20;
-        wf.Column(2).Width = 20;
-        wf.Column(3).Width = 14;
-        wf.Column(4).Width = 16;
-        wf.Column(5).Width = 10;
-        wf.Column(6).Width = 12;
-        wf.Column(7).Width = 16;
-        wf.Column(8).Width = 10;
-        wf.Column(9).Width = 12;
-    }
 
-    private static void BuildImportTemplate(ExcelPackage package)
-    {
-        // Config sheet — connection settings are managed by the launcher's Connect screen
-        var config = package.Workbook.Worksheets.Add("Config");
-        config.Cells[1, 1].Value = "Setting";
-        config.Cells[1, 2].Value = "Value";
-        config.Cells[2, 1].Value = "ImportMode";
-        config.Cells[2, 2].Value = "Update";
-        config.Cells[3, 1].Value = "AddIfNotFound";
-        config.Cells[3, 2].Value = "false";
-        config.Cells[4, 1].Value = "WorkAreaId";
-        config.Cells[5, 1].Value = "HeaderRows";
-        config.Cells[5, 2].Value = "1";
-        config.Cells[6, 1].Value = "SkipHiddenRows";
-        config.Cells[6, 2].Value = "true";
-        config.Cells[7, 1].Value = "DryRun";
-        config.Cells[7, 2].Value = "true";
+        private static void BuildImportTemplate(ExcelPackage package)
+        {
+            // Config sheet — connection settings are managed by the launcher's Connect screen
+            var config = package.Workbook.Worksheets.Add("Config");
+            config.Cells[1, 1].Value = "Setting";
+            config.Cells[1, 2].Value = "Value";
+            config.Cells[2, 1].Value = "ImportMode";
+            config.Cells[2, 2].Value = "Update";
+            config.Cells[3, 1].Value = "AddIfNotFound";
+            config.Cells[3, 2].Value = "false";
+            config.Cells[4, 1].Value = "WorkAreaId";
+            config.Cells[5, 1].Value = "HeaderRows";
+            config.Cells[5, 2].Value = "1";
+            config.Cells[6, 1].Value = "SkipHiddenRows";
+            config.Cells[6, 2].Value = "true";
+            config.Cells[7, 1].Value = "DryRun";
+            config.Cells[7, 2].Value = "true";
         config.Cells[1, 1].Style.Font.Bold = true;
         config.Cells[1, 2].Style.Font.Bold = true;
         config.Column(1).Width = 18;

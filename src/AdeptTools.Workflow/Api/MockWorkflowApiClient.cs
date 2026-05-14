@@ -1,4 +1,5 @@
 using AdeptTools.Core.Models;
+using AdeptTools.Workflow.Input;
 using AdeptTools.Workflow.Models;
 
 namespace AdeptTools.Workflow.Api;
@@ -196,6 +197,22 @@ public class MockWorkflowApiClient : IWorkflowApiClient
         {
             new() { Key = "ALL_USERS", DisplayName = "All Users" },
             new() { Key = "ENGINEERING", DisplayName = "Engineering Team" }
+        });
+    }
+
+    public virtual Task<List<AdeptUserEntry>> GetUsersAsync(CancellationToken ct = default)
+    {
+        return Task.FromResult(new List<AdeptUserEntry>
+        {
+            new() { UserId = "jsmith", DisplayName = "Smith, John" },
+            new() { UserId = "mjones", DisplayName = "Jones, Mary" },
+            new() { UserId = "akhan", DisplayName = "Khan, Amir" },
+            new() { UserId = "cchiboroski", DisplayName = "Chiboroski, Craig" },
+            new() { UserId = "rbabu", DisplayName = "Rameshbabu, Vijay" },
+            new() { UserId = "bwilson", DisplayName = "Wilson, Bob" },
+            new() { UserId = "user1", DisplayName = "User, Test One" },
+            new() { UserId = "reviewer1", DisplayName = "Reviewer, First" },
+            new() { UserId = "notifyUser", DisplayName = "Notify, User" }
         });
     }
 }

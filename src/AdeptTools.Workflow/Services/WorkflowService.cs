@@ -55,6 +55,24 @@ public class WorkflowService : IWorkflowService
             return batch;
         }
 
+        // Name resolution — resolve all User-type trustees before proceeding
+        var resolutionResult = await ResolveTrusteesAsync(input.Workflows, ct);
+        if (!resolutionResult.AllResolved)
+        {
+            foreach (var failure in resolutionResult.Failures)
+            {
+                batch.Results.Add(new WorkflowOperationResult
+                {
+                    WorkflowName = failure.WorkflowName,
+                    Status = WorkflowResultStatus.Fail,
+                    Message = failure.Message
+                });
+                batch.Failed++;
+            }
+            batch.Total = resolutionResult.Failures.Count;
+            return batch;
+        }
+
         if (request.DryRun)
         {
             foreach (var wf in input.Workflows)
@@ -193,6 +211,24 @@ public class WorkflowService : IWorkflowService
     {
         var input = ReadInput(request.InputFilePath);
         var batch = new WorkflowBatchResult { Total = input.Workflows.Count, DryRun = request.DryRun };
+
+        // Name resolution — resolve all User-type trustees before proceeding
+        var resolutionResult = await ResolveTrusteesAsync(input.Workflows, ct);
+        if (!resolutionResult.AllResolved)
+        {
+            foreach (var failure in resolutionResult.Failures)
+            {
+                batch.Results.Add(new WorkflowOperationResult
+                {
+                    WorkflowName = failure.WorkflowName,
+                    Status = WorkflowResultStatus.Fail,
+                    Message = failure.Message
+                });
+                batch.Failed++;
+            }
+            batch.Total = resolutionResult.Failures.Count;
+            return batch;
+        }
 
         // Get existing workflows for name → ID mapping
         var existing = await _apiClient.GetWorkflowsBasicAsync(ct);
@@ -625,5 +661,88 @@ public class WorkflowService : IWorkflowService
         {
             // Best-effort untag — don't mask the original error
         }
+    }
+
+    private async Task<TrusteeResolutionResult> ResolveTrusteesAsync(
+        List<WorkflowInputModel> workflows, CancellationToken ct)
+    {
+        var result = new TrusteeResolutionResult();
+
+        // Collect all User-type trustees
+        var hasUserTrustees = workflows.Any(wf =>
+            wf.Steps.Any(s =>
+                s.Trustees.Any(t => t.TrusteeType == WorkflowUserType.User)));
+
+        if (!hasUserTrustees)
+        {
+            result.AllResolved = true;
+            return result;
+        }
+
+        // Fetch user list
+        var users = await _apiClient.GetUsersAsync(ct);
+        var matcher = new UserMatcher(users);
+
+        foreach (var wf in workflows)
+        {
+            foreach (var step in wf.Steps)
+            {
+                foreach (var trustee in step.Trustees)
+                {
+                    if (trustee.TrusteeType != WorkflowUserType.User)
+                        continue;
+
+                    var matchResult = matcher.Match(trustee.TrusteeId);
+
+                    switch (matchResult.Confidence)
+                    {
+                        case MatchConfidence.Exact:
+                            // Already valid — no change needed
+                            break;
+
+                        case MatchConfidence.Strong:
+                            // Auto-resolve: replace input with the actual user ID
+                            trustee.TrusteeId = matchResult.ResolvedUserId!;
+                            result.Resolved.Add(matchResult);
+                            break;
+
+                        case MatchConfidence.Weak:
+                            result.Failures.Add(new TrusteeResolutionFailure
+                            {
+                                WorkflowName = wf.Name,
+                                Message = $"Trustee \"{matchResult.InputValue}\" in step \"{step.Name}\": " +
+                                          $"weak match — did you mean \"{matchResult.ResolvedUserId}\" " +
+                                          $"({matchResult.MatchedDisplayName})?"
+                            });
+                            break;
+
+                        case MatchConfidence.None:
+                            result.Failures.Add(new TrusteeResolutionFailure
+                            {
+                                WorkflowName = wf.Name,
+                                Message = $"Trustee \"{matchResult.InputValue}\" in step \"{step.Name}\": " +
+                                          "no match found. Provide the Adept user ID."
+                            });
+                            break;
+                    }
+                }
+            }
+        }
+
+        result.AllResolved = result.Failures.Count == 0;
+        return result;
+    }
+
+    private class TrusteeResolutionResult
+    {
+        public bool AllResolved { get; set; }
+        public List<UserMatchResult> Resolved { get; } = new();
+        public List<TrusteeResolutionFailure> Failures { get; } = new();
+    }
+
+    private class TrusteeResolutionFailure
+    {
+        public string WorkflowName { get; set; } = string.Empty;
+        public string Message { get; set; } = string.Empty;
     }
 }
