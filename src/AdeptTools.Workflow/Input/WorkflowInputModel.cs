@@ -2,6 +2,13 @@ using AdeptTools.Workflow.Models;
 
 namespace AdeptTools.Workflow.Input;
 
+public enum TrusteeRole
+{
+    Reviewer,
+    EmailNotify,
+    AlertNotify
+}
+
 public class WorkflowInputModel
 {
     public string Name { get; set; } = string.Empty;
@@ -26,4 +33,5 @@ public class WorkflowInputTrustee
 {
     public string TrusteeId { get; set; } = string.Empty;
     public WorkflowUserType TrusteeType { get; set; }
+    public TrusteeRole Role { get; set; } = TrusteeRole.Reviewer;
 }

@@ -138,6 +138,12 @@ public class WorkflowService : IWorkflowService
                 ConfigureStep(model.WorkflowStepModels[s], input.Steps[s], workflowId);
             }
 
+            // Enable workflow-level email notify if any step has notification trustees
+            if (model.WorkflowStepModels.Any(s => s.EmailNotificationList.Count > 0 || s.AlertNotificationList.Count > 0))
+            {
+                model.WorkflowDefinition.BDoEmailNotify = true;
+            }
+
             // 5. Save
             var saveResult = await _apiClient.SaveWorkflowAsync(model, ct);
             if (!saveResult.IsSuccess)
@@ -302,6 +308,12 @@ public class WorkflowService : IWorkflowService
             for (int s = 0; s < input.Steps.Count && s < model.WorkflowStepModels.Count; s++)
             {
                 ConfigureStep(model.WorkflowStepModels[s], input.Steps[s], workflowId);
+            }
+
+            // Enable workflow-level email notify if any step has notification trustees
+            if (model.WorkflowStepModels.Any(s => s.EmailNotificationList.Count > 0 || s.AlertNotificationList.Count > 0))
+            {
+                model.WorkflowDefinition.BDoEmailNotify = true;
             }
 
             // Save
@@ -496,13 +508,42 @@ public class WorkflowService : IWorkflowService
         stepModel.WorkflowStepDefinition.RequiredApprovalsCount = input.RequiredApprovalsCount;
         stepModel.WorkflowStepDefinition.AutoAdvance = input.AutoAdvance;
 
-        stepModel.WorkflowTrusteeDefinitions = input.Trustees.Select(t => new WorkflowTrusteeDefinition
+        var stepId = stepModel.WorkflowStepDefinition.StepId;
+
+        // Split trustees by role
+        var reviewers = input.Trustees.Where(t => t.Role == TrusteeRole.Reviewer);
+        var emailNotify = input.Trustees.Where(t => t.Role == TrusteeRole.EmailNotify);
+        var alertNotify = input.Trustees.Where(t => t.Role == TrusteeRole.AlertNotify);
+
+        stepModel.WorkflowTrusteeDefinitions = reviewers.Select(t => new WorkflowTrusteeDefinition
         {
             WorkflowId = workflowId,
-            StepId = stepModel.WorkflowStepDefinition.StepId,
+            StepId = stepId,
             TrusteeId = t.TrusteeId,
             Type = t.TrusteeType
         }).ToList();
+
+        stepModel.EmailNotificationList = emailNotify.Select(t => new WorkflowNotificationDefinition
+        {
+            WorkflowId = workflowId,
+            StepId = stepId,
+            TrusteeId = t.TrusteeId,
+            Type = t.TrusteeType
+        }).ToList();
+
+        stepModel.AlertNotificationList = alertNotify.Select(t => new WorkflowNotificationDefinition
+        {
+            WorkflowId = workflowId,
+            StepId = stepId,
+            TrusteeId = t.TrusteeId,
+            Type = t.TrusteeType
+        }).ToList();
+
+        // Enable email notify flag if notification trustees exist
+        if (stepModel.EmailNotificationList.Count > 0 || stepModel.AlertNotificationList.Count > 0)
+        {
+            stepModel.WorkflowStepDefinition.BDoEmailNotify = true;
+        }
     }
 
     private static List<WorkflowAdminItem> ApplyFilters(

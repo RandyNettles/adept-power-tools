@@ -89,13 +89,17 @@ public class WorkflowXmlReader
 
                             var id = trusteeElement.GetAttribute("Id");
                             var typeText = trusteeElement.GetAttribute("Type");
+                            var roleText = trusteeElement.GetAttribute("Role");
 
                             if (!string.IsNullOrWhiteSpace(id) && TrusteeTypeMapper.TryMap(typeText, out var trusteeType))
                             {
+                                TrusteeTypeMapper.TryMapRole(roleText, out var role);
+
                                 step.Trustees.Add(new WorkflowInputTrustee
                                 {
                                     TrusteeId = id,
-                                    TrusteeType = trusteeType
+                                    TrusteeType = trusteeType,
+                                    Role = role
                                 });
                             }
                         }

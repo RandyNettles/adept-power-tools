@@ -130,8 +130,10 @@ public partial class TemplateViewModel : ObservableObject
         wf.Cells[7, 3].Value = "Auto Advance";
         wf.Cells[7, 4].Value = "Trustee 1";
         wf.Cells[7, 5].Value = "Type 1";
-        wf.Cells[7, 6].Value = "Trustee 2";
-        wf.Cells[7, 7].Value = "Type 2";
+        wf.Cells[7, 6].Value = "Role 1";
+        wf.Cells[7, 7].Value = "Trustee 2";
+        wf.Cells[7, 8].Value = "Type 2";
+        wf.Cells[7, 9].Value = "Role 2";
 
         // Example row
         wf.Cells[8, 1].Value = "Review";
@@ -139,9 +141,13 @@ public partial class TemplateViewModel : ObservableObject
         wf.Cells[8, 3].Value = "false";
         wf.Cells[8, 4].Value = "jsmith";
         wf.Cells[8, 5].Value = "User";
+        wf.Cells[8, 6].Value = "Reviewer";
+        wf.Cells[8, 7].Value = "eng-managers";
+        wf.Cells[8, 8].Value = "Group";
+        wf.Cells[8, 9].Value = "Notify";
 
         // Formatting
-        using (var range = wf.Cells[7, 1, 7, 7])
+        using (var range = wf.Cells[7, 1, 7, 9])
         {
             range.Style.Font.Bold = true;
         }
@@ -150,8 +156,10 @@ public partial class TemplateViewModel : ObservableObject
         wf.Column(3).Width = 14;
         wf.Column(4).Width = 16;
         wf.Column(5).Width = 10;
-        wf.Column(6).Width = 16;
-        wf.Column(7).Width = 10;
+        wf.Column(6).Width = 12;
+        wf.Column(7).Width = 16;
+        wf.Column(8).Width = 10;
+        wf.Column(9).Width = 12;
     }
 
     private static void BuildImportTemplate(ExcelPackage package)

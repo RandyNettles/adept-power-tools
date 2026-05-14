@@ -8,6 +8,7 @@ public class WorkflowExcelReader
 {
     private static readonly Regex TrusteeHeaderRegex = new(@"^Trustee\s+(\d+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex TypeHeaderRegex = new(@"^Type\s+(\d+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex RoleHeaderRegex = new(@"^Role\s+(\d+)$", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     public WorkflowExcelInput Read(string filePath)
     {
@@ -68,8 +69,8 @@ public class WorkflowExcelReader
         int approvalsCol = FindColumn(headers, "Approvals Required");
         int autoAdvanceCol = FindColumn(headers, "Auto Advance");
 
-        // Find trustee/type column pairs
-        var trusteePairs = FindTrusteePairs(headers);
+        // Find trustee/type/role column groups
+        var trusteeGroups = FindTrusteeGroups(headers);
 
         // Read step rows starting at row 8
         var row = headerRow + 1;
@@ -97,7 +98,7 @@ public class WorkflowExcelReader
             }
 
             // Read trustees
-            foreach (var (trusteeCol, typeCol) in trusteePairs)
+            foreach (var (trusteeCol, typeCol, roleCol) in trusteeGroups)
             {
                 var trusteeId = GetCellText(sheet, row, trusteeCol);
                 var typeText = GetCellText(sheet, row, typeCol);
@@ -107,10 +108,18 @@ public class WorkflowExcelReader
 
                 if (TrusteeTypeMapper.TryMap(typeText, out var trusteeType))
                 {
+                    var role = TrusteeRole.Reviewer;
+                    if (roleCol >= 0)
+                    {
+                        var roleText = GetCellText(sheet, row, roleCol);
+                        TrusteeTypeMapper.TryMapRole(roleText, out role);
+                    }
+
                     step.Trustees.Add(new WorkflowInputTrustee
                     {
                         TrusteeId = trusteeId,
-                        TrusteeType = trusteeType
+                        TrusteeType = trusteeType,
+                        Role = role
                     });
                 }
             }
@@ -147,10 +156,11 @@ public class WorkflowExcelReader
         return -1;
     }
 
-    private static List<(int TrusteeCol, int TypeCol)> FindTrusteePairs(Dictionary<int, string> headers)
+    private static List<(int TrusteeCol, int TypeCol, int RoleCol)> FindTrusteeGroups(Dictionary<int, string> headers)
     {
         var trusteeColumns = new Dictionary<int, int>(); // number → column
         var typeColumns = new Dictionary<int, int>();     // number → column
+        var roleColumns = new Dictionary<int, int>();     // number → column
 
         foreach (var (col, header) in headers)
         {
@@ -165,19 +175,27 @@ public class WorkflowExcelReader
             if (typeMatch.Success)
             {
                 typeColumns[int.Parse(typeMatch.Groups[1].Value)] = col;
+                continue;
+            }
+
+            var roleMatch = RoleHeaderRegex.Match(header);
+            if (roleMatch.Success)
+            {
+                roleColumns[int.Parse(roleMatch.Groups[1].Value)] = col;
             }
         }
 
-        var pairs = new List<(int, int)>();
+        var groups = new List<(int, int, int)>();
         foreach (var (number, trusteeCol) in trusteeColumns.OrderBy(kv => kv.Key))
         {
             if (typeColumns.TryGetValue(number, out var typeCol))
             {
-                pairs.Add((trusteeCol, typeCol));
+                var roleCol = roleColumns.TryGetValue(number, out var rc) ? rc : -1;
+                groups.Add((trusteeCol, typeCol, roleCol));
             }
         }
 
-        return pairs;
+        return groups;
     }
 
     private static string GetCellText(ExcelWorksheet sheet, int row, int col)

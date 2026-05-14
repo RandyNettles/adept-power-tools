@@ -1,3 +1,4 @@
+using AdeptTools.Core.Models;
 using AdeptTools.Workflow.Api;
 using AdeptTools.Workflow.Input;
 using AdeptTools.Workflow.Models;
@@ -127,6 +128,70 @@ public class WorkflowServiceCreateTests
         }
     }
 
+    [Fact]
+    public async Task CreateAsync_WithNotificationTrustees_SetsNotificationLists()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var capturingClient = new CapturingSaveClient(savedModels);
+        var service = CreateService(capturingClient);
+
+        var xmlPath = CreateTempXmlWithRoles(new[]
+        {
+            new WorkflowInputModel
+            {
+                Name = "Notify WF",
+                Active = true,
+                Steps = new List<WorkflowInputStep>
+                {
+                    new()
+                    {
+                        Name = "Review Step",
+                        Trustees = new List<WorkflowInputTrustee>
+                        {
+                            new() { TrusteeId = "reviewer1", TrusteeType = WorkflowUserType.User, Role = TrusteeRole.Reviewer },
+                            new() { TrusteeId = "notifyUser", TrusteeType = WorkflowUserType.User, Role = TrusteeRole.EmailNotify },
+                            new() { TrusteeId = "alertGroup", TrusteeType = WorkflowUserType.Group, Role = TrusteeRole.AlertNotify }
+                        }
+                    }
+                }
+            }
+        });
+
+        try
+        {
+            var result = await service.CreateAsync(
+                new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Single(savedModels);
+
+            var saved = savedModels[0];
+            var step = saved.WorkflowStepModels[0];
+
+            // Reviewer trustees
+            Assert.Single(step.WorkflowTrusteeDefinitions);
+            Assert.Equal("reviewer1", step.WorkflowTrusteeDefinitions[0].TrusteeId);
+
+            // Email notification trustees
+            Assert.Single(step.EmailNotificationList);
+            Assert.Equal("notifyUser", step.EmailNotificationList[0].TrusteeId);
+
+            // Alert notification trustees
+            Assert.Single(step.AlertNotificationList);
+            Assert.Equal("alertGroup", step.AlertNotificationList[0].TrusteeId);
+
+            // Workflow-level email notify flag
+            Assert.True(saved.WorkflowDefinition.BDoEmailNotify);
+
+            // Step-level email notify flag
+            Assert.True(step.WorkflowStepDefinition.BDoEmailNotify);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
     // --- helpers ---
 
     private static WorkflowInputModel CreateSampleInput(string name, string[] stepNames)
@@ -187,8 +252,71 @@ public class WorkflowServiceCreateTests
         return path;
     }
 
+    private static string CreateTempXmlWithRoles(WorkflowInputModel[] workflows)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"wf_test_{Guid.NewGuid():N}.xml");
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("<AdeptWorkflowConfig>");
+        sb.AppendLine("  <Workflows>");
+        foreach (var wf in workflows)
+        {
+            sb.AppendLine($"    <Workflow Name=\"{EscapeXml(wf.Name)}\" Active=\"{wf.Active.ToString().ToLower()}\">");
+            sb.AppendLine("      <Steps>");
+            foreach (var step in wf.Steps)
+            {
+                sb.AppendLine($"        <Step Name=\"{EscapeXml(step.Name)}\" ApprovalsRequired=\"{step.RequiredApprovalsCount}\">");
+                if (step.Trustees.Count > 0)
+                {
+                    sb.AppendLine("          <Trustees>");
+                    foreach (var t in step.Trustees)
+                    {
+                        var typeStr = t.TrusteeType switch
+                        {
+                            WorkflowUserType.User => "User",
+                            WorkflowUserType.Group => "Group",
+                            WorkflowUserType.Key => "Meta",
+                            WorkflowUserType.Email => "Email",
+                            _ => "User"
+                        };
+                        var roleStr = t.Role switch
+                        {
+                            TrusteeRole.EmailNotify => "Notify",
+                            TrusteeRole.AlertNotify => "Alert",
+                            _ => "Reviewer"
+                        };
+                        sb.AppendLine($"            <Trustee Id=\"{EscapeXml(t.TrusteeId)}\" Type=\"{typeStr}\" Role=\"{roleStr}\" />");
+                    }
+                    sb.AppendLine("          </Trustees>");
+                }
+                sb.AppendLine("        </Step>");
+            }
+            sb.AppendLine("      </Steps>");
+            sb.AppendLine("    </Workflow>");
+        }
+        sb.AppendLine("  </Workflows>");
+        sb.AppendLine("</AdeptWorkflowConfig>");
+        File.WriteAllText(path, sb.ToString());
+        return path;
+    }
+
     private static string EscapeXml(string value)
     {
         return value.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
+    }
+
+    /// <summary>
+    /// Mock that captures the WorkflowEditModel passed to SaveWorkflowAsync.
+    /// </summary>
+    private class CapturingSaveClient : MockWorkflowApiClient
+    {
+        private readonly List<WorkflowEditModel> _saved;
+
+        public CapturingSaveClient(List<WorkflowEditModel> saved) => _saved = saved;
+
+        public override Task<ApiResult> SaveWorkflowAsync(WorkflowEditModel model, CancellationToken ct = default)
+        {
+            _saved.Add(model);
+            return Task.FromResult(ApiResult.Success("Captured."));
+        }
     }
 }
