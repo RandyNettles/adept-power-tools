@@ -133,6 +133,13 @@ public class WorkflowServiceDeleteTests
     private class TrackingMockWorkflowApiClient : MockWorkflowApiClient
     {
         public int DeleteCallCount { get; private set; }
+        public int GetWorkflowsCallCount { get; private set; }
+
+        public override Task<WorkflowAdminPacket> GetWorkflowsAsync(CancellationToken ct = default)
+        {
+            GetWorkflowsCallCount++;
+            return base.GetWorkflowsAsync(ct);
+        }
 
         public override Task<ApiResult> DeleteWorkflowAsync(string workflowId, CancellationToken ct = default)
         {
@@ -161,5 +168,146 @@ public class WorkflowServiceDeleteTests
                 }
             });
         }
+    }
+
+    /// <summary>
+    /// Mock client with many workflows for parallel testing.
+    /// </summary>
+    private class ManyWorkflowsMockClient : MockWorkflowApiClient
+    {
+        private readonly List<WorkflowAdminItem> _workflows;
+
+        public ManyWorkflowsMockClient(int count)
+        {
+            _workflows = Enumerable.Range(1, count).Select(i => new WorkflowAdminItem
+            {
+                WorkflowId = $"wf-{i:D3}",
+                WorkflowName = $"Workflow {i}",
+                Active = true,
+                StepCount = 2,
+                InProcessCount = 0,
+                Edit = true,
+                Share = true,
+                Delete = true
+            }).ToList();
+        }
+
+        public override Task<WorkflowAdminPacket> GetWorkflowsAsync(CancellationToken ct = default)
+        {
+            return Task.FromResult(new WorkflowAdminPacket
+            {
+                CurrentUserId = "MOCK_USER",
+                Workflows = _workflows
+            });
+        }
+    }
+
+    /// <summary>
+    /// Mock client with mixed permission/lock states.
+    /// </summary>
+    private class MixedPermissionMockClient : MockWorkflowApiClient
+    {
+        public override Task<WorkflowAdminPacket> GetWorkflowsAsync(CancellationToken ct = default)
+        {
+            return Task.FromResult(new WorkflowAdminPacket
+            {
+                CurrentUserId = "MOCK_USER",
+                Workflows = new List<WorkflowAdminItem>
+                {
+                    new()
+                    {
+                        WorkflowId = "wf-locked", WorkflowName = "Locked WF",
+                        Active = true, StepCount = 2, Delete = true,
+                        LockedByDisplayName = "Other User"
+                    },
+                    new()
+                    {
+                        WorkflowId = "wf-noperm", WorkflowName = "No Permission WF",
+                        Active = true, StepCount = 3, Delete = false
+                    },
+                    new()
+                    {
+                        WorkflowId = "wf-eligible", WorkflowName = "Eligible WF",
+                        Active = true, StepCount = 1, Delete = true
+                    }
+                }
+            });
+        }
+    }
+
+    [Fact]
+    public async Task DeleteAsync_WorkflowIds_DeletesOnlySpecifiedIds()
+    {
+        var client = new ManyWorkflowsMockClient(4);
+        var service = CreateService(client);
+
+        var result = await service.DeleteAsync(new WorkflowDeleteRequest
+        {
+            WorkflowIds = new List<string> { "wf-001", "wf-003" },
+            Force = true
+        });
+
+        Assert.Equal(2, result.Total);
+        Assert.Equal(2, result.Succeeded);
+        Assert.Contains(result.Results, r => r.WorkflowName == "Workflow 1");
+        Assert.Contains(result.Results, r => r.WorkflowName == "Workflow 3");
+        Assert.DoesNotContain(result.Results, r => r.WorkflowName == "Workflow 2");
+        Assert.DoesNotContain(result.Results, r => r.WorkflowName == "Workflow 4");
+    }
+
+    [Fact]
+    public async Task DeleteAsync_WorkflowIds_ExcludesLockedAndNoPermission()
+    {
+        var client = new MixedPermissionMockClient();
+        var service = CreateService(client);
+
+        var result = await service.DeleteAsync(new WorkflowDeleteRequest
+        {
+            WorkflowIds = new List<string> { "wf-locked", "wf-noperm", "wf-eligible" },
+            Force = true
+        });
+
+        Assert.Equal(1, result.Total);
+        Assert.Equal(1, result.Succeeded);
+        Assert.Equal("Eligible WF", result.Results[0].WorkflowName);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_ParallelExecution_AllSucceed()
+    {
+        var client = new ManyWorkflowsMockClient(12);
+        var service = CreateService(client);
+
+        var result = await service.DeleteAsync(new WorkflowDeleteRequest
+        {
+            Filter = "*",
+            Force = true
+        });
+
+        Assert.Equal(12, result.Total);
+        Assert.Equal(12, result.Succeeded);
+        Assert.Equal(0, result.Failed);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_PreFetchedPacket_NoExtraFetch()
+    {
+        var trackingClient = new TrackingMockWorkflowApiClient();
+        var service = CreateService(trackingClient);
+
+        // Pre-fetch the packet manually
+        var packet = await trackingClient.GetWorkflowsAsync();
+        trackingClient.GetWorkflowsCallCount.ToString(); // Reset isn't needed — we track from here
+        var callCountBefore = trackingClient.GetWorkflowsCallCount;
+
+        var result = await service.DeleteAsync(new WorkflowDeleteRequest
+        {
+            Filter = "*",
+            PreFetchedPacket = packet,
+            Force = true
+        });
+
+        Assert.Equal(0, trackingClient.GetWorkflowsCallCount - callCountBefore);
+        Assert.True(result.Succeeded > 0);
     }
 }

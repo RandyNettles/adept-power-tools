@@ -10,6 +10,8 @@ namespace AdeptTools.Workflow.Services;
 
 public class WorkflowService : IWorkflowService
 {
+    private const int MaxDeleteConcurrency = 5;
+
     private readonly IWorkflowApiClient _apiClient;
     private readonly WorkflowExcelReader _excelReader;
     private readonly WorkflowXmlReader _xmlReader;
@@ -359,12 +361,24 @@ public class WorkflowService : IWorkflowService
     {
         var batch = new WorkflowBatchResult { DryRun = request.DryRun };
 
-        // 1. Get full workflow list
-        var packet = await _apiClient.GetWorkflowsAsync(ct);
+        // 1. Get full workflow list (use pre-fetched if available)
+        var packet = request.PreFetchedPacket ?? await _apiClient.GetWorkflowsAsync(ct);
         var workflows = packet.Workflows;
 
-        // 2. Apply filter
-        var matched = ApplyFilters(workflows, request.Filter, request.Status);
+        // 2. Apply filter — ID-based or name-glob
+        List<WorkflowAdminItem> matched;
+        if (request.WorkflowIds is { Count: > 0 })
+        {
+            var idSet = new HashSet<string>(request.WorkflowIds, StringComparer.OrdinalIgnoreCase);
+            matched = workflows
+                .Where(w => idSet.Contains(w.WorkflowId) && w.Delete && string.IsNullOrEmpty(w.LockedByDisplayName))
+                .ToList();
+        }
+        else
+        {
+            matched = ApplyFilters(workflows, request.Filter ?? "*", request.Status);
+        }
+
         batch.Total = matched.Count;
 
         if (matched.Count == 0)
@@ -410,59 +424,79 @@ public class WorkflowService : IWorkflowService
             return batch;
         }
 
-        // 5. Execute deletions
-        for (int i = 0; i < matched.Count; i++)
-        {
-            ct.ThrowIfCancellationRequested();
-            var wf = matched[i];
+        // 5. Execute deletions in parallel with bounded concurrency
+        var semaphore = new SemaphoreSlim(MaxDeleteConcurrency);
+        var progressIndex = 0;
 
+        var tasks = matched.Select(async wf =>
+        {
+            await semaphore.WaitAsync(ct);
             try
             {
-                var deleteResult = await _apiClient.DeleteWorkflowAsync(wf.WorkflowId, ct);
-                if (deleteResult.IsSuccess)
+                ct.ThrowIfCancellationRequested();
+
+                WorkflowOperationResult result;
+                try
                 {
-                    var msg = wf.InProcessCount > 0
-                        ? $"Deleted ({wf.InProcessCount} docs moved to System Workflow)"
-                        : "Deleted";
-                    batch.Results.Add(new WorkflowOperationResult
+                    var deleteResult = await _apiClient.DeleteWorkflowAsync(wf.WorkflowId, ct);
+                    if (deleteResult.IsSuccess)
                     {
-                        WorkflowName = wf.WorkflowName,
-                        Status = WorkflowResultStatus.Success,
-                        Message = msg
-                    });
-                    batch.Succeeded++;
+                        var msg = wf.InProcessCount > 0
+                            ? $"Deleted ({wf.InProcessCount} docs moved to System Workflow)"
+                            : "Deleted";
+                        result = new WorkflowOperationResult
+                        {
+                            WorkflowName = wf.WorkflowName,
+                            Status = WorkflowResultStatus.Success,
+                            Message = msg
+                        };
+                    }
+                    else
+                    {
+                        result = new WorkflowOperationResult
+                        {
+                            WorkflowName = wf.WorkflowName,
+                            Status = WorkflowResultStatus.Fail,
+                            Message = deleteResult.ErrorMessage ?? "Delete failed."
+                        };
+                    }
                 }
-                else
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    batch.Results.Add(new WorkflowOperationResult
+                    result = new WorkflowOperationResult
                     {
                         WorkflowName = wf.WorkflowName,
                         Status = WorkflowResultStatus.Fail,
-                        Message = deleteResult.ErrorMessage ?? "Delete failed."
-                    });
-                    batch.Failed++;
+                        Message = ex.Message
+                    };
                 }
-            }
-            catch (Exception ex)
-            {
-                batch.Results.Add(new WorkflowOperationResult
-                {
-                    WorkflowName = wf.WorkflowName,
-                    Status = WorkflowResultStatus.Fail,
-                    Message = ex.Message
-                });
-                batch.Failed++;
-            }
 
-            progress?.Report(new WorkflowProgress
+                lock (batch)
+                {
+                    batch.Results.Add(result);
+                    if (result.Status == WorkflowResultStatus.Success)
+                        batch.Succeeded++;
+                    else
+                        batch.Failed++;
+                }
+
+                var idx = Interlocked.Increment(ref progressIndex);
+                progress?.Report(new WorkflowProgress
+                {
+                    CurrentIndex = idx,
+                    TotalCount = matched.Count,
+                    WorkflowName = wf.WorkflowName,
+                    Status = result.Status,
+                    Message = result.Message
+                });
+            }
+            finally
             {
-                CurrentIndex = i + 1,
-                TotalCount = matched.Count,
-                WorkflowName = wf.WorkflowName,
-                Status = batch.Results[^1].Status,
-                Message = batch.Results[^1].Message
-            });
-        }
+                semaphore.Release();
+            }
+        });
+
+        await Task.WhenAll(tasks);
 
         return batch;
     }
@@ -485,7 +519,8 @@ public class WorkflowService : IWorkflowService
         {
             Workflows = workflows,
             TotalCount = workflows.Count,
-            AppliedFilter = request.Filter
+            AppliedFilter = request.Filter,
+            Packet = packet
         };
     }
 

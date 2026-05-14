@@ -272,7 +272,7 @@ public partial class WorkflowViewModel : ObservableObject
         {
             var request = new WorkflowDeleteRequest
             {
-                Filter = string.Join("|", deletableIds),
+                WorkflowIds = deletableIds,
                 DryRun = false
             };
             return await service.DeleteAsync(request, progress, ct);

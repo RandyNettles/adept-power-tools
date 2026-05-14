@@ -1,3 +1,5 @@
+using AdeptTools.Workflow.Models;
+
 namespace AdeptTools.Workflow.Services;
 
 public class WorkflowCreateRequest
@@ -14,11 +16,13 @@ public class WorkflowModifyRequest
 
 public class WorkflowDeleteRequest
 {
-    public required string Filter { get; init; }
+    public string? Filter { get; init; }
     public string Status { get; init; } = "all";
     public bool DryRun { get; init; }
     public bool Force { get; init; }
     public string? ManifestPath { get; init; }
+    public List<string>? WorkflowIds { get; init; }
+    public WorkflowAdminPacket? PreFetchedPacket { get; init; }
 }
 
 public class WorkflowListRequest

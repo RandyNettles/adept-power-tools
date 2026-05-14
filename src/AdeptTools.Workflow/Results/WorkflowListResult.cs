@@ -7,4 +7,5 @@ public class WorkflowListResult
     public List<WorkflowAdminItem> Workflows { get; set; } = new();
     public int TotalCount { get; set; }
     public string? AppliedFilter { get; set; }
+    public WorkflowAdminPacket? Packet { get; init; }
 }

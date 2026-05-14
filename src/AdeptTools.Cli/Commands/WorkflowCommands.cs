@@ -256,13 +256,18 @@ public static class WorkflowCommands
             Console.WriteLine($"  {"Name",-30} {"Active",-8} {"Steps",-7} {"In-Process",-12}");
             Console.WriteLine($"  {new string('─', 30)} {new string('─', 8)} {new string('─', 7)} {new string('─', 12)}");
 
-            var totalInProcess = 0;
-            foreach (var wf in listResult.Workflows)
+            const int MaxPreviewRows = 25;
+            var totalInProcess = listResult.Workflows.Sum(w => w.InProcessCount);
+            foreach (var wf in listResult.Workflows.Take(MaxPreviewRows))
             {
                 var active = wf.Active ? "✓" : "✗";
                 var inProcess = wf.InProcessCount > 0 ? $"{wf.InProcessCount} docs ⚠" : "0";
                 Console.WriteLine($"  {wf.WorkflowName,-30} {active,-8} {wf.StepCount,-7} {inProcess,-12}");
-                totalInProcess += wf.InProcessCount;
+            }
+
+            if (listResult.Workflows.Count > MaxPreviewRows)
+            {
+                Console.WriteLine($"  ... and {listResult.Workflows.Count - MaxPreviewRows} more workflows");
             }
 
             if (totalInProcess > 0)
@@ -310,7 +315,8 @@ public static class WorkflowCommands
                 Status = status,
                 DryRun = false,
                 Force = true, // Already confirmed above
-                ManifestPath = manifest
+                ManifestPath = manifest,
+                PreFetchedPacket = listResult.Packet
             }, progress, context.GetCancellationToken());
 
             Console.WriteLine();
