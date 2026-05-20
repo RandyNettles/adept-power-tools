@@ -45,7 +45,9 @@ public class HttpAdeptAuthService : IAdeptAuthService
             // Continue — will attempt OAuth settings next
         }
 
-        var loginMode = bootstrap?.LoginMode ?? (bootstrap?.IsOauthEnabled == true ? "oauth" : "local");
+        var loginMode = bootstrap?.LoginMode ??
+            (bootstrap?.IsOauthEnabled == true ? "oauth" :
+             bootstrap?.IsCognitoConfigured == true ? "cognito" : "local");
 
         // Local login mode: username/password directly against the server
         if (loginMode.Equals("local", StringComparison.OrdinalIgnoreCase))
