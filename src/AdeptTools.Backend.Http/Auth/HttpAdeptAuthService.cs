@@ -49,9 +49,19 @@ public class HttpAdeptAuthService : IAdeptAuthService
             (bootstrap?.IsOauthEnabled == true ? "oauth" :
              bootstrap?.IsCognitoConfigured == true ? "cognito" : "local");
 
-        // Local login mode: username/password directly against the server
+        // Windows SSO mode: pass current Windows domain credentials
+        if (loginMode.Equals("sso", StringComparison.OrdinalIgnoreCase))
+            return await LoginWithWindowsSsoAsync(userName, ct);
+
+        // Local login mode: username/password directly against the server.
+        // If no password was provided, fall back to Windows SSO (server may be advertising
+        // local mode while actually configured for Windows integrated auth).
         if (loginMode.Equals("local", StringComparison.OrdinalIgnoreCase))
-            return await LoginWithPasswordAsync(userName, password, ct);
+        {
+            if (!string.IsNullOrEmpty(password))
+                return await LoginWithPasswordAsync(userName, password, ct);
+            return await LoginWithWindowsSsoAsync(userName, ct);
+        }
 
         // Determine which SSO path to use
         bool useCognito = bootstrap is { IsCognitoConfigured: true, IsOauthEnabled: false };
@@ -200,6 +210,56 @@ public class HttpAdeptAuthService : IAdeptAuthService
         finally
         {
             listener.Stop();
+        }
+    }
+
+    private async Task<AuthResult> LoginWithWindowsSsoAsync(string userName, CancellationToken ct)
+    {
+        try
+        {
+            var loginRequest = new AccountLoginRequest
+            {
+                UserName = userName,
+                Password = "",
+                WindowsDomain = Environment.UserDomainName,
+                WindowsLogin = Environment.UserName,
+                ForceLogin = false,
+                ClientId = "Adept"
+            };
+
+            var authResponse = await PostLoginAsync(loginRequest, ct);
+            if (authResponse is null)
+                return new AuthResult(false, "Empty response from server");
+
+            if (authResponse.StatusCode != 0 && IsAlreadyLoggedInError(authResponse))
+            {
+                loginRequest.ForceLogin = true;
+                authResponse = await PostLoginAsync(loginRequest, ct);
+                if (authResponse is null)
+                    return new AuthResult(false, "Empty response from server");
+            }
+
+            if (authResponse.StatusCode != 0)
+                return new AuthResult(false, authResponse.ErrorMessage ?? "Windows SSO login failed");
+
+            AccessToken = authResponse.AccessToken;
+            IsAuthenticated = true;
+            _httpClient.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", AccessToken);
+
+            return new AuthResult(
+                Success: true,
+                AccessToken: authResponse.AccessToken,
+                UserId: authResponse.UserId,
+                UserName: authResponse.UserName,
+                DisplayName: authResponse.DisplayName,
+                EmailAddress: authResponse.EmailAddress,
+                AppVersion: authResponse.AppVersion,
+                WorkAreaId: authResponse.WorkAreaId);
+        }
+        catch (HttpRequestException ex)
+        {
+            return new AuthResult(false, $"Windows SSO login failed: {ex.Message}");
         }
     }
 
