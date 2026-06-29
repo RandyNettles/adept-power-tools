@@ -1,0 +1,66 @@
+# User Flow Catalog
+
+- Date: 2026-06-29
+- Scope: CLI and Client user flows derived from implemented behavior
+
+## Entries
+- UF-US-AUTH-001: Adaptive Login Mode Routing
+  - File: docs/design/user-flows/UF-US-AUTH-001-Adaptive-Login-Mode-Routing.md
+  - Source story: docs/prd/user_stories/US-Auth-Session.md
+  - Source requirement: FR-015 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
+- UF-US-CLI-001: Global Runtime Options
+  - File: docs/design/user-flows/UF-US-CLI-001-Global-Runtime-Options.md
+  - Source story: docs/prd/user_stories/US-CLI.md
+  - Source requirements: FR-001, FR-002, FR-003 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
+- UF-US-CLI-002: Authentication Smoke Test
+  - File: docs/design/user-flows/UF-US-CLI-002-Authentication-Smoke-Test.md
+  - Source story: docs/prd/user_stories/US-CLI.md
+  - Source requirement: FR-004 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
+- UF-US-CLI-003: Workflow Listing and Filtering
+  - File: docs/design/user-flows/UF-US-CLI-003-Workflow-List-and-Filter.md
+  - Source story: docs/prd/user_stories/US-CLI.md
+  - Source requirement: FR-005 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
+- UF-US-CLI-004: Workflow Change Execution with Dry-Run
+  - File: docs/design/user-flows/UF-US-CLI-004-Workflow-Change-with-Dry-Run.md
+  - Source story: docs/prd/user_stories/US-CLI.md
+  - Source requirement: FR-006 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
+- UF-US-CLI-005: Safe Workflow Deletion
+  - File: docs/design/user-flows/UF-US-CLI-005-Safe-Workflow-Delete.md
+  - Source story: docs/prd/user_stories/US-CLI.md
+  - Source requirements: FR-007, FR-029, FR-030 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
+- UF-US-CLI-006: Import Pipeline Commands
+  - File: docs/design/user-flows/UF-US-CLI-006-Import-Pipeline-Commands.md
+  - Source story: docs/prd/user_stories/US-CLI.md
+  - Source requirement: FR-008 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
+- UF-US-CONN-01: Connect-First Navigation Gating
+  - File: docs/design/user-flows/UF-US-CONN-01-Connect-First-Navigation-Gating.md
+  - Source story: docs/prd/user_stories/US-Client.md
+  - Source requirement: FR-009 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
+- UF-US-CONN-02 and UF-US-CONN-03: Connection Options and Status Feedback
+  - File: docs/design/user-flows/UF-US-CONN-02-03-Connection-Options-and-Status.md
+  - Source story: docs/prd/user_stories/US-Client.md
+  - Source requirements: FR-010, FR-011 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
+- UF-US-CONN-04: Multi-Account Selection in Connect Flow
+  - File: docs/design/user-flows/UF-US-CONN-04-Multi-Account-Selection.md
+  - Source story: docs/prd/user_stories/US-Client.md
+  - Source requirement: FR-012 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
+- UF-US-CONN-05 and UF-US-CONN-06: Connection Persistence and Profile Management
+  - File: docs/design/user-flows/UF-US-CONN-05-06-Connection-Persistence-and-Profiles.md
+  - Source story: docs/prd/user_stories/US-Client.md
+  - Source requirements: FR-013, FR-014 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
+- UF-US-AUTH-006: Secure Session Resume on Startup
+  - File: docs/design/user-flows/UF-US-AUTH-006-Secure-Session-Resume-Client.md
+  - Source story: docs/prd/user_stories/US-Auth-Session.md
+  - Source requirements: FR-021, FR-022 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
+- UF-US-WF-006: Client Workflow Operations
+  - File: docs/design/user-flows/UF-US-WF-006-Client-Workflow-Operations.md
+  - Source story: docs/prd/user_stories/US-Workflow.md
+  - Source requirement: FR-031 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
+- UF-US-IMP-007: Client Import Operations
+  - File: docs/design/user-flows/UF-US-IMP-007-Client-Import-Operations.md
+  - Source story: docs/prd/user_stories/US-Import.md
+  - Source requirement: FR-038 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
+- UF-US-IMP-008: Client Template Generation
+  - File: docs/design/user-flows/UF-US-IMP-008-Client-Template-Generation.md
+  - Source story: docs/prd/user_stories/US-Import.md
+  - Source requirement: FR-039 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md

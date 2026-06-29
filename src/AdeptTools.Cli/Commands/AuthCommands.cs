@@ -77,10 +77,47 @@ public static class AuthCommands
                 userName,
                 password);
 
+            if (!authResult.Success && authResult.RequiresUserSelection)
+            {
+                if (authResult.UserChoices is null || authResult.UserChoices.Count == 0)
+                {
+                    Console.WriteLine("  Status:     \u001b[31m✗ Connection failed\u001b[0m");
+                    Console.WriteLine("  Error:      Multiple Adept accounts were returned, but no selectable users were provided.");
+                    Console.WriteLine();
+                    context.ExitCode = 1;
+                    return;
+                }
+
+                Console.WriteLine("  Select user:");
+                for (var i = 0; i < authResult.UserChoices.Count; i++)
+                {
+                    var choice = authResult.UserChoices[i];
+                    Console.WriteLine($"    {i + 1}. {choice.DisplayLabel}");
+                }
+
+                Console.Write("  Choice:     ");
+                var input = Console.ReadLine();
+                if (!int.TryParse(input, out var selectedIndex) ||
+                    selectedIndex < 1 || selectedIndex > authResult.UserChoices.Count)
+                {
+                    Console.WriteLine("  Status:     \u001b[31m✗ Connection failed\u001b[0m");
+                    Console.WriteLine("  Error:      Invalid selection.");
+                    Console.WriteLine();
+                    context.ExitCode = 1;
+                    return;
+                }
+
+                var selected = authResult.UserChoices[selectedIndex - 1];
+                authResult = await authService.SelectUserAsync(selected.Id, selected.UserName);
+            }
+
             if (!authResult.Success)
             {
+                var error = string.IsNullOrWhiteSpace(authResult.ErrorMessage)
+                    ? "Authentication failed. No additional details were returned by the server."
+                    : authResult.ErrorMessage;
                 Console.WriteLine($"  Status:     \u001b[31m✗ Connection failed\u001b[0m");
-                Console.WriteLine($"  Error:      {authResult.ErrorMessage}");
+                Console.WriteLine($"  Error:      {error}");
                 Console.WriteLine();
                 context.ExitCode = 1;
                 return;
