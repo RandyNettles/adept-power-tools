@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -23,6 +24,7 @@ public class HttpAdeptAuthService : IAdeptAuthService
     private const string CognitoCallbackPath = "callback";
 
     private string? _serverBaseUrl;
+    private string? _refreshToken;
 
     /// <summary>Stored when the server returns status 230 — contains the access_token issued alongside the multiple-user prompt.</summary>
     private AuthenticateResponse? _pending230Response;
@@ -36,6 +38,100 @@ public class HttpAdeptAuthService : IAdeptAuthService
 
     public bool IsAuthenticated { get; private set; }
     public string? AccessToken { get; private set; }
+    public string? RefreshToken => _refreshToken;
+
+    public DateTimeOffset? GetAccessTokenExpiryUtc(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return null;
+
+        try
+        {
+            var parts = token.Split('.');
+            if (parts.Length < 2)
+                return null;
+
+            var payload = parts[1]
+                .Replace('-', '+')
+                .Replace('_', '/');
+            switch (payload.Length % 4)
+            {
+                case 2: payload += "=="; break;
+                case 3: payload += "="; break;
+            }
+
+            var bytes = Convert.FromBase64String(payload);
+            using var doc = JsonDocument.Parse(bytes);
+            if (!doc.RootElement.TryGetProperty("exp", out var expEl))
+                return null;
+
+            long unixSeconds;
+            if (expEl.ValueKind == JsonValueKind.Number && expEl.TryGetInt64(out var n))
+            {
+                unixSeconds = n;
+            }
+            else if (expEl.ValueKind == JsonValueKind.String &&
+                     long.TryParse(expEl.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var s))
+            {
+                unixSeconds = s;
+            }
+            else
+            {
+                return null;
+            }
+
+            return DateTimeOffset.FromUnixTimeSeconds(unixSeconds);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    public async Task<AuthResult> TryResumeSessionAsync(
+        string serverUrl,
+        string accessToken,
+        string? refreshToken,
+        DateTimeOffset? accessTokenExpiresUtc,
+        string? userId,
+        string? userName,
+        string? displayName,
+        string? emailAddress,
+        string? appVersion,
+        string? workAreaId,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(serverUrl) || string.IsNullOrWhiteSpace(accessToken))
+            return new AuthResult(false, "Saved session is incomplete.");
+
+        var expiry = accessTokenExpiresUtc ?? GetAccessTokenExpiryUtc(accessToken);
+        if (expiry.HasValue && expiry.Value <= DateTimeOffset.UtcNow)
+            return new AuthResult(false, "Saved session has expired.");
+
+        _serverBaseUrl = serverUrl.TrimEnd('/') + "/";
+        AccessToken = accessToken;
+        _refreshToken = refreshToken;
+        IsAuthenticated = true;
+        _httpClient.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", AccessToken);
+
+        var refreshResult = await RefreshAsync(ct);
+        if (!refreshResult.Success)
+        {
+            await LogoutAsync(ct);
+            return new AuthResult(false, refreshResult.ErrorMessage ?? "Saved session is no longer valid.");
+        }
+
+        return new AuthResult(
+            Success: true,
+            AccessToken: AccessToken,
+            UserId: userId,
+            UserName: userName,
+            DisplayName: displayName,
+            EmailAddress: emailAddress,
+            AppVersion: appVersion,
+            WorkAreaId: workAreaId);
+    }
 
     public async Task<AuthResult> LoginAsync(string serverUrl, string userName, string password = "", CancellationToken ct = default)
     {
@@ -571,6 +667,7 @@ public class HttpAdeptAuthService : IAdeptAuthService
     private AuthResult BuildAuthResult(AuthenticateResponse r)
     {
         AccessToken = r.AccessToken;
+        _refreshToken = r.RefreshToken;
         IsAuthenticated = true;
         _httpClient.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", AccessToken);
@@ -630,6 +727,7 @@ public class HttpAdeptAuthService : IAdeptAuthService
     {
         IsAuthenticated = false;
         AccessToken = null;
+        _refreshToken = null;
         _httpClient.DefaultRequestHeaders.Authorization = null;
         return Task.CompletedTask;
     }
@@ -644,6 +742,7 @@ public class HttpAdeptAuthService : IAdeptAuthService
         {
             IsAuthenticated = false;
             AccessToken = null;
+            _refreshToken = null;
             return new AuthResult(false, "Session expired");
         }
 

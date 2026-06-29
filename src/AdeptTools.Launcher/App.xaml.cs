@@ -72,6 +72,7 @@ public partial class App : Application
         var httpClientConfig = new HttpClientConfig();
         services.AddSingleton(httpClientConfig);
         services.AddSingleton<ServerHistoryService>();
+        services.AddSingleton<AuthSessionStore>();
         services.AddSingleton<ComProfileService>();
 
         // COM backend services

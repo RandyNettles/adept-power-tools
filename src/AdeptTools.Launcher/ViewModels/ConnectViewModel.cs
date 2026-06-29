@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using AdeptTools.Core.Auth;
 using AdeptTools.Core.Models;
+using AdeptTools.Backend.Http.Auth;
 using AdeptTools.Launcher.Controls;
 using AdeptTools.Launcher.Converters;
 using AdeptTools.Launcher.Models;
@@ -17,6 +18,7 @@ public partial class ConnectViewModel : ObservableObject
     private readonly MockModeState _mockModeState;
     private readonly HttpClientConfig _httpClientConfig;
     private readonly ServerHistoryService _serverHistory;
+    private readonly AuthSessionStore _authSessionStore;
     private readonly ComProfileService _comProfileService;
     private string _password = string.Empty;
 
@@ -74,12 +76,14 @@ public partial class ConnectViewModel : ObservableObject
         MockModeState mockModeState,
         HttpClientConfig httpClientConfig,
         ServerHistoryService serverHistory,
+        AuthSessionStore authSessionStore,
         ComProfileService comProfileService)
     {
         _authServiceFactory = authServiceFactory;
         _mockModeState = mockModeState;
         _httpClientConfig = httpClientConfig;
         _serverHistory = serverHistory;
+        _authSessionStore = authSessionStore;
         _comProfileService = comProfileService;
         _isMockMode = _mockModeState.IsMock;
 
@@ -100,6 +104,73 @@ public partial class ConnectViewModel : ObservableObject
         {
             IsMockMode = isMock;
         };
+
+        _ = TryResumeHttpSessionAsync();
+    }
+
+    private async Task TryResumeHttpSessionAsync()
+    {
+        if (IsMockMode)
+            return;
+
+        var saved = _authSessionStore.Load();
+        if (saved is null || string.IsNullOrWhiteSpace(saved.ServerUrl) || string.IsNullOrWhiteSpace(saved.AccessToken))
+            return;
+
+        if (string.IsNullOrWhiteSpace(ServerUrl))
+            ServerUrl = saved.ServerUrl;
+        if (string.IsNullOrWhiteSpace(UserName) && !string.IsNullOrWhiteSpace(saved.UserName))
+            UserName = saved.UserName;
+
+        if (_authServiceFactory(BackendType.Http) is not HttpAdeptAuthService httpAuth)
+            return;
+
+        var expiry = saved.AccessTokenExpiresUtc ?? httpAuth.GetAccessTokenExpiryUtc(saved.AccessToken);
+        if (expiry.HasValue && expiry.Value <= DateTimeOffset.UtcNow)
+        {
+            _authSessionStore.Clear();
+            return;
+        }
+
+        try
+        {
+            Status = ConnectionStatus.Connecting;
+            StatusText = "Resuming session...";
+            ErrorMessage = null;
+
+            var result = await httpAuth.TryResumeSessionAsync(
+                saved.ServerUrl,
+                saved.AccessToken,
+                saved.RefreshToken,
+                saved.AccessTokenExpiresUtc,
+                saved.UserId,
+                saved.UserName,
+                saved.DisplayName,
+                saved.EmailAddress,
+                saved.AppVersion,
+                saved.WorkAreaId);
+
+            if (!result.Success)
+            {
+                _authSessionStore.Clear();
+                ResetConnectionStatus();
+                return;
+            }
+
+            SelectedBackend = BackendType.Http;
+            Status = ConnectionStatus.Connected;
+            StatusText = "Connected";
+            DisplayName = result.DisplayName ?? result.UserName;
+            ServerVersion = result.AppVersion;
+
+            _httpClientConfig.BaseUrl = saved.ServerUrl.TrimEnd('/') + "/";
+            _httpClientConfig.AccessToken = result.AccessToken;
+        }
+        catch
+        {
+            _authSessionStore.Clear();
+            ResetConnectionStatus();
+        }
     }
 
     private void RefreshComProfiles()
@@ -193,6 +264,29 @@ public partial class ConnectViewModel : ObservableObject
                 _httpClientConfig.BaseUrl = url.TrimEnd('/') + "/";
                 _httpClientConfig.AccessToken = result.AccessToken;
 
+                if (!IsMockMode && SelectedBackend == BackendType.Http &&
+                    authService is HttpAdeptAuthService httpAuth &&
+                    !string.IsNullOrWhiteSpace(result.AccessToken))
+                {
+                    _authSessionStore.Save(new HttpAuthSessionState
+                    {
+                        ServerUrl = url.TrimEnd('/') + "/",
+                        AccessToken = result.AccessToken!,
+                        RefreshToken = httpAuth.RefreshToken,
+                        AccessTokenExpiresUtc = httpAuth.GetAccessTokenExpiryUtc(result.AccessToken),
+                        UserId = result.UserId,
+                        UserName = result.UserName,
+                        DisplayName = result.DisplayName,
+                        EmailAddress = result.EmailAddress,
+                        AppVersion = result.AppVersion,
+                        WorkAreaId = result.WorkAreaId
+                    });
+                }
+                else if (SelectedBackend != BackendType.Http || IsMockMode)
+                {
+                    _authSessionStore.Clear();
+                }
+
                 // Remember successful server URL
                 if (!IsMockMode)
                 {
@@ -207,6 +301,9 @@ public partial class ConnectViewModel : ObservableObject
                 Status = ConnectionStatus.Error;
                 StatusText = "Connection failed";
                 ErrorMessage = result.ErrorMessage ?? "Unknown error";
+
+                if (SelectedBackend == BackendType.Http)
+                    _authSessionStore.Clear();
             }
         }
         catch (Exception ex)
@@ -214,6 +311,9 @@ public partial class ConnectViewModel : ObservableObject
             Status = ConnectionStatus.Error;
             StatusText = "Connection failed";
             ErrorMessage = ex.Message;
+
+            if (SelectedBackend == BackendType.Http)
+                _authSessionStore.Clear();
         }
     }
 
