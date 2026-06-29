@@ -1,7 +1,10 @@
 using System.Windows;
+using AdeptTools.Backend.Com.Auth;
+using AdeptTools.Backend.Com.Infrastructure;
 using AdeptTools.Backend.Http.Auth;
 using AdeptTools.Backend.Http.Api;
 using AdeptTools.Core.Auth;
+using AdeptTools.Core.Models;
 using AdeptTools.Import.Api;
 using AdeptTools.Import.Readers;
 using AdeptTools.Import.Services;
@@ -69,15 +72,26 @@ public partial class App : Application
         var httpClientConfig = new HttpClientConfig();
         services.AddSingleton(httpClientConfig);
         services.AddSingleton<ServerHistoryService>();
+        services.AddSingleton<ComProfileService>();
 
-        // Auth service factory — returns mock or HTTP based on runtime toggle
+        // COM backend services
+        services.AddSingleton<ComOperationRunner>();
+        services.AddSingleton<ComSessionManager>();
+        services.AddSingleton<ComAdeptAuthService>();
+
+        // Auth service factory — returns mock, HTTP, or COM based on runtime state
         services.AddSingleton<MockAdeptAuthService>();
         services.AddHttpClient<HttpAdeptAuthService>();
-        services.AddSingleton<Func<IAdeptAuthService>>(sp =>
+        services.AddSingleton<Func<BackendType, IAdeptAuthService>>(sp =>
         {
-            return () => sp.GetRequiredService<MockModeState>().IsMock
-                ? sp.GetRequiredService<MockAdeptAuthService>()
-                : sp.GetRequiredService<HttpAdeptAuthService>();
+            return (backend) =>
+            {
+                if (sp.GetRequiredService<MockModeState>().IsMock)
+                    return sp.GetRequiredService<MockAdeptAuthService>();
+                return backend == BackendType.Com
+                    ? sp.GetRequiredService<ComAdeptAuthService>()
+                    : sp.GetRequiredService<HttpAdeptAuthService>();
+            };
         });
 
         // Workflow services — returns mock or HTTP based on runtime toggle

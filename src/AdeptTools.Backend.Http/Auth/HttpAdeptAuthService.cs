@@ -18,7 +18,16 @@ public class HttpAdeptAuthService : IAdeptAuthService
     private const int CallbackPortRangeStart = 49100;
     private const int CallbackPortRangeEnd = 49110;
 
+    // Cognito app client has exactly http://localhost:51555/callback registered.
+    private const int CognitoCallbackPort = 51555;
+    private const string CognitoCallbackPath = "callback";
+
     private string? _serverBaseUrl;
+
+    /// <summary>Stored when the server returns status 230 — contains the access_token issued alongside the multiple-user prompt.</summary>
+    private AuthenticateResponse? _pending230Response;
+    /// <summary>The SSO state hash from the flow that produced the 230 — used to identify the pending session during user selection.</summary>
+    private string? _pending230StateHash;
 
     public HttpAdeptAuthService(HttpClient httpClient)
     {
@@ -30,7 +39,12 @@ public class HttpAdeptAuthService : IAdeptAuthService
 
     public async Task<AuthResult> LoginAsync(string serverUrl, string userName, string password = "", CancellationToken ct = default)
     {
-        _serverBaseUrl = serverUrl.TrimEnd('/') + "/";
+        // Strip any query string or fragment from the URL — users sometimes paste browser
+        // redirect URLs (e.g. https://server/?src=connect) instead of the raw API base URL.
+        if (Uri.TryCreate(serverUrl, UriKind.Absolute, out var parsedUri))
+            _serverBaseUrl = parsedUri.GetLeftPart(UriPartial.Path).TrimEnd('/') + "/";
+        else
+            _serverBaseUrl = serverUrl.TrimEnd('/') + "/";
 
         // Step 0: Determine login mode from server bootstrap
         ClientBootstrapResponse? bootstrap = null;
@@ -40,7 +54,7 @@ public class HttpAdeptAuthService : IAdeptAuthService
             if (bootstrapResponse.IsSuccessStatusCode)
                 bootstrap = await bootstrapResponse.Content.ReadFromJsonAsync<ClientBootstrapResponse>(JsonOptions, ct);
         }
-        catch (HttpRequestException)
+        catch (Exception ex) when (ex is HttpRequestException or JsonException)
         {
             // Continue — will attempt OAuth settings next
         }
@@ -49,28 +63,22 @@ public class HttpAdeptAuthService : IAdeptAuthService
             (bootstrap?.IsOauthEnabled == true ? "oauth" :
              bootstrap?.IsCognitoConfigured == true ? "cognito" : "local");
 
-        // Windows SSO mode: pass current Windows domain credentials
-        if (loginMode.Equals("sso", StringComparison.OrdinalIgnoreCase))
-            return await LoginWithWindowsSsoAsync(userName, ct);
+        // Normalise Azure AD variant spellings to "oauth"
+        if (loginMode.Equals("azure", StringComparison.OrdinalIgnoreCase) ||
+            loginMode.Equals("azuread", StringComparison.OrdinalIgnoreCase) ||
+            loginMode.Equals("entra", StringComparison.OrdinalIgnoreCase))
+            loginMode = "oauth";
 
-        // Local login mode: username/password directly against the server.
-        // If no password was provided, fall back to Windows SSO (server may be advertising
-        // local mode while actually configured for Windows integrated auth).
-        if (loginMode.Equals("local", StringComparison.OrdinalIgnoreCase))
-        {
-            if (!string.IsNullOrEmpty(password))
-                return await LoginWithPasswordAsync(userName, password, ct);
-            return await LoginWithWindowsSsoAsync(userName, ct);
-        }
+        // Local login with an explicit password — go straight to password auth.
+        if (loginMode.Equals("local", StringComparison.OrdinalIgnoreCase) && !string.IsNullOrEmpty(password))
+            return await LoginWithPasswordAsync(userName, password, ct);
 
-        // Determine which SSO path to use
-        bool useCognito = bootstrap is { IsCognitoConfigured: true, IsOauthEnabled: false };
-        bool useOAuth = bootstrap is null or { IsOauthEnabled: true };
-
-        if (bootstrap is not null && !bootstrap.IsOauthEnabled && !bootstrap.IsCognitoConfigured)
-            return new AuthResult(false, "This server does not have SSO or Cognito configured. Please provide a password for local login.");
-
-        // Step 1: Fetch SSO settings (OAuth or Cognito)
+        // For every other case where the password is blank (loginMode "sso", "oauth", "cognito",
+        // or "local" with no password), attempt browser SSO flows in order:
+        //   1. Customer-configured OAuth IDP  (OAuthSettings endpoint — covers Azure AD / Entra)
+        //   2. Cognito / Synergis internal IDP (cognito-settings endpoint)
+        //   3. Windows domain credentials     (last resort, only when loginMode != "oauth"/"cognito")
+        bool useCognito = false;
         string authorizeEndpoint;
         string tokenEndpoint;
         string clientId;
@@ -78,60 +86,83 @@ public class HttpAdeptAuthService : IAdeptAuthService
         string stateHash;
         string? additionalParams = null;
 
-        if (useCognito)
+        // Try OAuth / Azure AD settings
+        SsoSettingsResponse? oauthCfg = null;
+        string? oauthFetchError = null;
+        try
         {
-            // Cognito path (Synergis internal IDP)
+            var r = await _httpClient.GetAsync($"{_serverBaseUrl}api/admin/options/OAuthSettings", ct);
+            if (r.IsSuccessStatusCode)
+            {
+                var body = await r.Content.ReadAsStringAsync(ct);
+                if (!string.IsNullOrWhiteSpace(body))
+                    oauthCfg = JsonSerializer.Deserialize<SsoSettingsResponse>(body, JsonOptions);
+            }
+            else
+            {
+                oauthFetchError = $"OAuthSettings returned HTTP {(int)r.StatusCode}";
+            }
+        }
+        catch (Exception ex) { oauthFetchError = ex.Message; }
+
+        bool oauthConfigured = !string.IsNullOrWhiteSpace(oauthCfg?.AuthorizationUrl) &&
+                               !string.IsNullOrWhiteSpace(oauthCfg?.ClientId);
+
+        // When the server explicitly says OAuth (Azure AD), never fall through to Cognito.
+        bool oauthOnlyMode = loginMode.Equals("oauth", StringComparison.OrdinalIgnoreCase);
+
+        if (oauthConfigured)
+        {
+            authorizeEndpoint = oauthCfg!.AuthorizationUrl!;
+            tokenEndpoint = oauthCfg.TokenUrl ?? authorizeEndpoint.Replace("/authorize", "/token");
+            clientId = oauthCfg.ClientId!;
+            scope = oauthCfg.Scope ?? "openid email profile";
+            stateHash = oauthCfg.StateHash ?? GenerateState();
+            additionalParams = oauthCfg.OAuthAdditionalLoginParams;
+        }
+        else if (!oauthOnlyMode)
+        {
+            // Try Cognito settings
+            CognitoSettingsResponse? cognitoCfg = null;
             try
             {
-                var cognitoResponse = await _httpClient.GetAsync($"{_serverBaseUrl}api/admin/options/cognito-settings", ct);
-                cognitoResponse.EnsureSuccessStatusCode();
-                var cognito = await cognitoResponse.Content.ReadFromJsonAsync<CognitoSettingsResponse>(JsonOptions, ct)
-                    ?? throw new InvalidOperationException("Empty Cognito settings response");
+                var r = await _httpClient.GetAsync($"{_serverBaseUrl}api/admin/options/cognito-settings", ct);
+                if (r.IsSuccessStatusCode)
+                    cognitoCfg = await r.Content.ReadFromJsonAsync<CognitoSettingsResponse>(JsonOptions, ct);
+            }
+            catch { }
 
-                if (string.IsNullOrWhiteSpace(cognito.AuthUrl) || string.IsNullOrWhiteSpace(cognito.ClientId))
-                    return new AuthResult(false, "Cognito SSO is not properly configured on this server");
-
-                authorizeEndpoint = cognito.AuthUrl!;
-                tokenEndpoint = cognito.AuthUrl!.Replace("/authorize", "/token");
-                clientId = cognito.ClientId!;
-                scope = cognito.Scope ?? "openid email";
+            if (!string.IsNullOrWhiteSpace(cognitoCfg?.AuthUrl) && !string.IsNullOrWhiteSpace(cognitoCfg?.ClientId))
+            {
+                useCognito = true;
+                authorizeEndpoint = cognitoCfg.AuthUrl!;
+                tokenEndpoint = cognitoCfg.AuthUrl!.Replace("/authorize", "/token");
+                clientId = cognitoCfg.ClientId!;
+                scope = cognitoCfg.Scope ?? "openid email";
                 stateHash = $"cognito-{GenerateState()}";
             }
-            catch (HttpRequestException ex)
+            else
             {
-                return new AuthResult(false, $"Failed to fetch Cognito settings: {ex.Message}");
+                // Neither OAuth nor Cognito configured — fall back to Windows domain auth.
+                return await LoginWithWindowsSsoAsync(userName, ct);
             }
         }
         else
         {
-            // Customer-configured OAuth IDP
-            try
-            {
-                var settingsResponse = await _httpClient.GetAsync($"{_serverBaseUrl}api/admin/options/OAuthSettings", ct);
-                settingsResponse.EnsureSuccessStatusCode();
-                var oauthSettings = await settingsResponse.Content.ReadFromJsonAsync<SsoSettingsResponse>(JsonOptions, ct)
-                    ?? throw new InvalidOperationException("Empty OAuth settings response");
-
-                if (string.IsNullOrWhiteSpace(oauthSettings.AuthorizationUrl) || string.IsNullOrWhiteSpace(oauthSettings.ClientId))
-                    return new AuthResult(false, "SSO is not configured on this server (missing authorization URL or client ID)");
-
-                authorizeEndpoint = oauthSettings.AuthorizationUrl!;
-                tokenEndpoint = oauthSettings.TokenUrl ?? authorizeEndpoint.Replace("/authorize", "/token");
-                clientId = oauthSettings.ClientId!;
-                scope = oauthSettings.Scope ?? "openid email profile";
-                stateHash = oauthSettings.StateHash ?? GenerateState();
-                additionalParams = oauthSettings.OAuthAdditionalLoginParams;
-            }
-            catch (HttpRequestException ex)
-            {
-                return new AuthResult(false, $"Failed to fetch OAuth settings: {ex.Message}");
-            }
+            // Server says OAuth/Azure but settings were unreachable.
+            var detail = oauthFetchError is not null ? $" ({oauthFetchError})" : "";
+            return new AuthResult(false,
+                $"Azure AD / OAuth SSO is configured on this server but the settings could not be " +
+                $"retrieved from /api/admin/options/OAuthSettings{detail}. " +
+                $"Verify the server URL is correct and the endpoint is accessible.");
         }
 
         // Step 2: Start localhost callback listener
-        var (listener, redirectUri) = StartCallbackListener();
+        var (listener, redirectUri) = StartCallbackListener(useCognito);
         if (listener is null)
-            return new AuthResult(false, "Unable to start SSO callback listener (ports 49100–49110 in use)");
+            return new AuthResult(false, useCognito
+                ? $"Unable to start SSO callback listener on port {CognitoCallbackPort} (port in use)"
+                : "Unable to start SSO callback listener (ports 49100–49110 in use)");
 
         try
         {
@@ -139,12 +170,29 @@ public class HttpAdeptAuthService : IAdeptAuthService
             var codeVerifier = GenerateCodeVerifier();
             var codeChallenge = ComputeCodeChallenge(codeVerifier);
 
-            // Step 4: Open browser to IdP authorize endpoint
+            // Step 4: Build authorize URL and pre-flight check redirect URI acceptance.
+            // Cognito immediately 302-redirects to its own error page when redirect_uri is not
+            // registered — we can detect this without opening a browser by checking that first
+            // redirect, avoiding a 3-minute listener timeout for the user.
             var authorizeUrl = BuildAuthorizeUrl(authorizeEndpoint, clientId, redirectUri,
                 scope, codeChallenge, stateHash, useCognito ? null : userName, additionalParams);
 
             if (useCognito)
                 authorizeUrl += "&prompt=login";
+
+            // Pre-flight check: skip for Cognito because the redirect URI is now exactly matched
+            // (http://localhost:51555/callback). Running the pre-flight against Cognito can
+            // start a spurious OAuth session that delivers a callback to our listener before the
+            // user even opens the browser, causing state-mismatch failures.
+            if (!useCognito)
+            {
+                var preflightError = await CheckRedirectUriAcceptedAsync(authorizeUrl, ct);
+                if (preflightError is not null)
+                {
+                    var idpName = "Azure AD / OAuth";
+                    return new AuthResult(false, $"{idpName}: {preflightError}");
+                }
+            }
 
             Process.Start(new ProcessStartInfo(authorizeUrl) { UseShellExecute = true });
 
@@ -158,7 +206,7 @@ public class HttpAdeptAuthService : IAdeptAuthService
             // Step 6: Call Adept server's /api/Account/login with auth code + PKCE verifier
             var loginRequest = new AccountLoginRequest
             {
-                UserName = "SSO",
+                UserName = userName,   // send the typed username, not the literal "SSO"
                 Password = "",
                 AuthCode = authCode,
                 SsoStateReceived = stateHash,
@@ -169,12 +217,29 @@ public class HttpAdeptAuthService : IAdeptAuthService
                 ClientId = "Adept"
             };
 
-            var loginResponse = await _httpClient.PostAsJsonAsync($"{_serverBaseUrl}api/Account/login", loginRequest, JsonOptions, ct);
-            loginResponse.EnsureSuccessStatusCode();
-
-            var authResponse = await loginResponse.Content.ReadFromJsonAsync<AuthenticateResponse>(JsonOptions, ct);
+            // Use PostLoginAsync so we read the body on 4xx responses and surface the real error.
+            var (authResponse, rawBody) = await PostLoginAsync(loginRequest, ct);
             if (authResponse is null)
                 return new AuthResult(false, "Empty response from server");
+
+            if (authResponse.StatusCode != 0 && IsAlreadyLoggedInError(authResponse))
+            {
+                loginRequest.ForceLogin = true;
+                (authResponse, rawBody) = await PostLoginAsync(loginRequest, ct);
+                if (authResponse is null)
+                    return new AuthResult(false, "Empty response from server");
+            }
+
+            // Status 230 — multiple Adept users are linked to this IdP identity.
+            if (authResponse.StatusCode == 230)
+            {
+                _pending230Response = authResponse;
+                _pending230StateHash = stateHash;  // save the SSO session identifier
+                List<UserChoice>? choices;
+                try { choices = ParseUserChoices(rawBody!); }
+                catch (Exception ex) { return new AuthResult(false, $"Status 230 parse error: {ex.GetType().Name}: {ex.Message}"); }
+                return new AuthResult(false, RequiresUserSelection: true, UserChoices: choices);
+            }
 
             if (authResponse.StatusCode != 0)
                 return new AuthResult(false, authResponse.ErrorMessage ?? "SSO login failed");
@@ -193,8 +258,7 @@ public class HttpAdeptAuthService : IAdeptAuthService
                 DisplayName: authResponse.DisplayName,
                 EmailAddress: authResponse.EmailAddress,
                 AppVersion: authResponse.AppVersion,
-                WorkAreaId: authResponse.WorkAreaId);
-        }
+                WorkAreaId: authResponse.WorkAreaId);        }
         catch (OperationCanceledException)
         {
             return new AuthResult(false, "SSO login was cancelled");
@@ -209,8 +273,43 @@ public class HttpAdeptAuthService : IAdeptAuthService
         }
         finally
         {
-            listener.Stop();
+            listener.Close(); // Close() releases the port; Stop() alone does not.
         }
+    }
+
+    /// <summary>
+    /// Makes a no-redirect GET to the OAuth authorize URL and checks whether Cognito/IdP
+    /// immediately rejects the redirect_uri (redirect_mismatch). Returns a human-readable
+    /// error string if rejected, or null if the redirect URI appears to be accepted.
+    /// </summary>
+    private static async Task<string?> CheckRedirectUriAcceptedAsync(string authorizeUrl, CancellationToken ct)
+    {
+        try
+        {
+            using var handler = new HttpClientHandler { AllowAutoRedirect = false };
+            using var client = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
+            var response = await client.GetAsync(authorizeUrl, ct);
+
+            // Cognito responds with 302 → its own /error page when redirect_uri is not registered.
+            if (response.StatusCode is HttpStatusCode.Found or HttpStatusCode.Redirect or HttpStatusCode.MovedPermanently)
+            {
+                var location = response.Headers.Location?.ToString() ?? "";
+                if (location.Contains("error=redirect_mismatch") || location.Contains("error=invalid_redirect_uri"))
+                {
+                    return "SSO failed: the OAuth/Cognito app client does not have 'http://localhost' " +
+                           "in its allowed callback URLs. " +
+                           "An administrator must add 'http://localhost' to the Cognito (or OAuth) " +
+                           "app client's allowed callback URLs. " +
+                           "Per AWS documentation, registering 'http://localhost' allows any localhost port.";
+                }
+            }
+        }
+        catch
+        {
+            // Pre-flight is best-effort; if it fails just proceed and let the listener handle it.
+        }
+
+        return null;
     }
 
     private async Task<AuthResult> LoginWithWindowsSsoAsync(string userName, CancellationToken ct)
@@ -227,35 +326,30 @@ public class HttpAdeptAuthService : IAdeptAuthService
                 ClientId = "Adept"
             };
 
-            var authResponse = await PostLoginAsync(loginRequest, ct);
+            var (authResponse, rawBody) = await PostLoginAsync(loginRequest, ct);
             if (authResponse is null)
                 return new AuthResult(false, "Empty response from server");
 
             if (authResponse.StatusCode != 0 && IsAlreadyLoggedInError(authResponse))
             {
                 loginRequest.ForceLogin = true;
-                authResponse = await PostLoginAsync(loginRequest, ct);
+                (authResponse, rawBody) = await PostLoginAsync(loginRequest, ct);
                 if (authResponse is null)
                     return new AuthResult(false, "Empty response from server");
             }
 
+            if (authResponse.StatusCode == 230)
+            {
+                _pending230Response = authResponse;
+                List<UserChoice>? ch;
+                try { ch = ParseUserChoices(rawBody!); } catch { ch = null; }
+                return new AuthResult(false, RequiresUserSelection: true, UserChoices: ch);
+            }
+
             if (authResponse.StatusCode != 0)
-                return new AuthResult(false, authResponse.ErrorMessage ?? "Windows SSO login failed");
+                return new AuthResult(false, GetFriendlyAuthErrorMessage(authResponse, "Windows SSO login failed"));
 
-            AccessToken = authResponse.AccessToken;
-            IsAuthenticated = true;
-            _httpClient.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", AccessToken);
-
-            return new AuthResult(
-                Success: true,
-                AccessToken: authResponse.AccessToken,
-                UserId: authResponse.UserId,
-                UserName: authResponse.UserName,
-                DisplayName: authResponse.DisplayName,
-                EmailAddress: authResponse.EmailAddress,
-                AppVersion: authResponse.AppVersion,
-                WorkAreaId: authResponse.WorkAreaId);
+            return BuildAuthResult(authResponse);
         }
         catch (HttpRequestException ex)
         {
@@ -275,36 +369,31 @@ public class HttpAdeptAuthService : IAdeptAuthService
                 ClientId = "Adept"
             };
 
-            var authResponse = await PostLoginAsync(loginRequest, ct);
-            if (authResponse is null)
+            var (authResponse2, rawBody2) = await PostLoginAsync(loginRequest, ct);
+            if (authResponse2 is null)
                 return new AuthResult(false, "Empty response from server");
 
             // If user is already logged in, retry with forceLogin
-            if (authResponse.StatusCode != 0 && IsAlreadyLoggedInError(authResponse))
+            if (authResponse2.StatusCode != 0 && IsAlreadyLoggedInError(authResponse2))
             {
                 loginRequest.ForceLogin = true;
-                authResponse = await PostLoginAsync(loginRequest, ct);
-                if (authResponse is null)
+                (authResponse2, rawBody2) = await PostLoginAsync(loginRequest, ct);
+                if (authResponse2 is null)
                     return new AuthResult(false, "Empty response from server");
             }
 
-            if (authResponse.StatusCode != 0)
-                return new AuthResult(false, authResponse.ErrorMessage ?? "Login failed");
+            if (authResponse2.StatusCode == 230)
+            {
+                _pending230Response = authResponse2;
+                List<UserChoice>? ch;
+                try { ch = ParseUserChoices(rawBody2!); } catch { ch = null; }
+                return new AuthResult(false, RequiresUserSelection: true, UserChoices: ch);
+            }
 
-            AccessToken = authResponse.AccessToken;
-            IsAuthenticated = true;
-            _httpClient.DefaultRequestHeaders.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", AccessToken);
+            if (authResponse2.StatusCode != 0)
+                return new AuthResult(false, GetFriendlyAuthErrorMessage(authResponse2, "Login failed"));
 
-            return new AuthResult(
-                Success: true,
-                AccessToken: authResponse.AccessToken,
-                UserId: authResponse.UserId,
-                UserName: authResponse.UserName,
-                DisplayName: authResponse.DisplayName,
-                EmailAddress: authResponse.EmailAddress,
-                AppVersion: authResponse.AppVersion,
-                WorkAreaId: authResponse.WorkAreaId);
+            return BuildAuthResult(authResponse2);
         }
         catch (HttpRequestException ex)
         {
@@ -312,16 +401,188 @@ public class HttpAdeptAuthService : IAdeptAuthService
         }
     }
 
-    private async Task<AuthenticateResponse?> PostLoginAsync(AccountLoginRequest request, CancellationToken ct)
+    private async Task<(AuthenticateResponse? Response, string? RawBody)> PostLoginAsync(AccountLoginRequest request, CancellationToken ct)
     {
         var response = await _httpClient.PostAsJsonAsync($"{_serverBaseUrl}api/Account/login", request, JsonOptions, ct);
 
         // Read body regardless of status code — the server returns JSON even on 400
         var body = await response.Content.ReadAsStringAsync(ct);
         if (string.IsNullOrWhiteSpace(body))
-            return null;
+            return (null, null);
 
-        return JsonSerializer.Deserialize<AuthenticateResponse>(body, JsonOptions);
+        AuthenticateResponse? auth;
+        try
+        {
+            auth = JsonSerializer.Deserialize<AuthenticateResponse>(body, JsonOptions);
+        }
+        catch (JsonException ex)
+        {
+            // Return a synthetic error response that surfaces the raw body for diagnosis.
+            auth = new AuthenticateResponse
+            {
+                StatusCode = -1,
+                ErrorMessage = $"Unexpected server response (HTTP {(int)response.StatusCode}): {ex.Message} — Body: {body[..Math.Min(300, body.Length)]}"
+            };
+        }
+        return (auth, body);
+    }
+
+    /// <summary>Extracts the user list from the raw status-230 response body.</summary>
+    private static List<UserChoice>? ParseUserChoices(string rawBody)
+    {
+        using var doc = JsonDocument.Parse(rawBody);
+
+        // The server may encode the user list in several places.
+        // Collect candidate JSON strings to search through in order.
+        var candidates = new List<(string Source, string Json)>();
+
+        // 1. Top-level 'data' or 'resultData' arrays/strings
+        foreach (var propName in new[] { "data", "resultData" })
+        {
+            if (doc.RootElement.TryGetProperty(propName, out var el))
+            {
+                string? j = el.ValueKind == JsonValueKind.String ? el.GetString()
+                           : el.ValueKind == JsonValueKind.Array  ? el.GetRawText()
+                           : null;
+                if (!string.IsNullOrWhiteSpace(j) && j != "[]")
+                    candidates.Add((propName, j));
+            }
+        }
+
+        // 2. The 'errorMessage' field may itself be a JSON object string containing 'data'.
+        if (doc.RootElement.TryGetProperty("errorMessage", out var emEl) &&
+            emEl.ValueKind == JsonValueKind.String)
+        {
+            var inner = emEl.GetString();
+            if (!string.IsNullOrWhiteSpace(inner))
+                candidates.Add(("errorMessage(inner)", inner));
+        }
+
+        foreach (var (source, json) in candidates)
+        {
+            // The candidate may be the array itself, or a JSON object that contains 'data'.
+            List<UserSelectionItem>? items = null;
+            if (json.TrimStart().StartsWith("["))
+            {
+                // Direct array
+                items = JsonSerializer.Deserialize<List<UserSelectionItem>>(json, JsonOptions);
+            }
+            else if (json.TrimStart().StartsWith("{"))
+            {
+                // Object — look for 'data' inside it
+                using var inner = JsonDocument.Parse(json);
+                foreach (var innerProp in new[] { "data", "resultData" })
+                {
+                    if (inner.RootElement.TryGetProperty(innerProp, out var innerEl))
+                    {
+                        string? arrJson = innerEl.ValueKind == JsonValueKind.String ? innerEl.GetString()
+                                         : innerEl.ValueKind == JsonValueKind.Array  ? innerEl.GetRawText()
+                                         : null;
+                        if (!string.IsNullOrWhiteSpace(arrJson) && arrJson != "[]")
+                        {
+                            items = JsonSerializer.Deserialize<List<UserSelectionItem>>(arrJson, JsonOptions);
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (items is { Count: > 0 })
+            {
+                return items
+                    .Where(u => !string.IsNullOrEmpty(u.Id) && !string.IsNullOrEmpty(u.UserName))
+                    .Select(u => new UserChoice(u.Id!, u.UserName!, u.TypeLabel))
+                    .ToList();
+            }
+        }
+
+        var keys = string.Join(", ", doc.RootElement.EnumerateObject().Select(p => p.Name));
+        throw new Exception($"Could not find a non-empty user list in any expected field. Keys: [{keys}]");
+    }
+
+    /// <summary>
+    /// <summary>
+    /// Completes login after status 230 by re-calling /api/Account/login with the access_token
+    /// from the 230 response in the Authorization header plus the chosen user ID.
+    /// The original auth code must NOT be re-sent — it is already consumed.
+    /// </summary>
+    public async Task<AuthResult> SelectUserAsync(string userId, string userName, CancellationToken ct = default)
+    {
+        if (_pending230Response is null)
+            return new AuthResult(false, "No pending user selection — please log in again.");
+
+        var pending = _pending230Response;
+        var pendingStateHash = _pending230StateHash;
+        _pending230Response = null;
+        _pending230StateHash = null;
+
+        // The 230 response already has a valid access_token — the server completed the OAuth
+        // exchange and is just waiting for user-account disambiguation.
+        // Try using the 230 token directly first; if the selected user matches the one in the
+        // 230 response we're done. Otherwise attempt a disambiguation call.
+        if (!string.IsNullOrEmpty(pending.AccessToken))
+        {
+            // If the 230 userId matches the selected userId, accept the 230 session as-is.
+            if (string.Equals(pending.UserId, userId, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(pending.UserName, userName, StringComparison.OrdinalIgnoreCase))
+            {
+                return BuildAuthResult(pending);
+            }
+        }
+
+        try
+        {
+            // Disambiguation call: tell the server which account to use for this SSO session.
+            var selectionRequest = new AccountLoginRequest
+            {
+                UserName = userName,
+                UserSelection = userId,
+                SsoStateReceived = pendingStateHash,
+                SsoStateHash = pendingStateHash,
+                SsoNonce = pending.SsoNonce,
+                ClientId = "Adept",
+                ForceLogin = false
+            };
+
+            // Include the 230 Bearer token so the server can find the pending session.
+            var previousAuth = _httpClient.DefaultRequestHeaders.Authorization;
+            if (!string.IsNullOrEmpty(pending.AccessToken))
+                _httpClient.DefaultRequestHeaders.Authorization =
+                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", pending.AccessToken);
+
+            var (authResponse, _) = await PostLoginAsync(selectionRequest, ct);
+
+            if (!IsAuthenticated)
+                _httpClient.DefaultRequestHeaders.Authorization = previousAuth;
+
+            if (authResponse is null)
+                return new AuthResult(false, "Empty response from server");
+            if (authResponse.StatusCode != 0)
+                return new AuthResult(false, GetFriendlyAuthErrorMessage(authResponse, "User selection failed"));
+
+            return BuildAuthResult(authResponse);
+        }
+        catch (Exception ex)
+        {
+            return new AuthResult(false, $"User selection error: {ex.Message}");
+        }
+    }
+
+    private AuthResult BuildAuthResult(AuthenticateResponse r)
+    {
+        AccessToken = r.AccessToken;
+        IsAuthenticated = true;
+        _httpClient.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", AccessToken);
+        return new AuthResult(
+            Success: true,
+            AccessToken: r.AccessToken,
+            UserId: r.UserId,
+            UserName: r.UserName,
+            DisplayName: r.DisplayName,
+            EmailAddress: r.EmailAddress,
+            AppVersion: r.AppVersion,
+            WorkAreaId: r.WorkAreaId);
     }
 
     private static bool IsAlreadyLoggedInError(AuthenticateResponse response)
@@ -332,6 +593,37 @@ public class HttpAdeptAuthService : IAdeptAuthService
             || msg.Contains("already connected", StringComparison.OrdinalIgnoreCase)
             || msg.Contains("active session", StringComparison.OrdinalIgnoreCase)
             || response.StatusCode == 160; // EC_USER_ALREADY_LOGGED_IN
+    }
+
+    private static string GetFriendlyAuthErrorMessage(AuthenticateResponse response, string fallback)
+    {
+        // Adept may wrap the actual message in a JSON string inside errorMessage.
+        var message = response.ErrorMessage;
+        if (!string.IsNullOrWhiteSpace(message) && message.TrimStart().StartsWith('{'))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(message);
+                if (doc.RootElement.TryGetProperty("message", out var innerMessage) &&
+                    innerMessage.ValueKind == JsonValueKind.String &&
+                    !string.IsNullOrWhiteSpace(innerMessage.GetString()))
+                {
+                    message = innerMessage.GetString();
+                }
+            }
+            catch
+            {
+                // Keep original message if nested JSON cannot be parsed.
+            }
+        }
+
+        if (response.StatusCode == 176)
+        {
+            return "Login failed: the selected Adept account is currently in use. " +
+                   "Close the existing session for that account or choose another user.";
+        }
+
+        return string.IsNullOrWhiteSpace(message) ? fallback : message;
     }
 
     public Task LogoutAsync(CancellationToken ct = default)
@@ -394,13 +686,38 @@ public class HttpAdeptAuthService : IAdeptAuthService
 
     #region Callback Listener
 
-    private static (HttpListener? Listener, string RedirectUri) StartCallbackListener()
+    private static (HttpListener? Listener, string RedirectUri) StartCallbackListener(bool useCognito)
     {
+        if (useCognito)
+        {
+            // Use the exact redirect URI registered in the Cognito app client.
+            // Retry briefly — ephemeral ports from other processes (e.g. VMware NAT) can
+            // temporarily occupy 51555 in CLOSE_WAIT and block http.sys from binding.
+            for (int attempt = 0; attempt < 5; attempt++)
+            {
+                if (attempt > 0)
+                    Thread.Sleep(1000);
+
+                var listener = new HttpListener();
+                listener.Prefixes.Add($"http://localhost:{CognitoCallbackPort}/");
+                try
+                {
+                    listener.Start();
+                    return (listener, $"http://localhost:{CognitoCallbackPort}/{CognitoCallbackPath}");
+                }
+                catch (HttpListenerException)
+                {
+                    listener.Close();
+                }
+            }
+            return (null, string.Empty);
+        }
+
+        // OAuth / Azure AD — try a range of high ports.
         for (int port = CallbackPortRangeStart; port <= CallbackPortRangeEnd; port++)
         {
-            var prefix = $"http://localhost:{port}/";
             var listener = new HttpListener();
-            listener.Prefixes.Add(prefix);
+            listener.Prefixes.Add($"http://localhost:{port}/");
             try
             {
                 listener.Start();
@@ -417,51 +734,90 @@ public class HttpAdeptAuthService : IAdeptAuthService
 
     private static async Task<CallbackResult> WaitForCallbackAsync(HttpListener listener, string expectedState, CancellationToken ct)
     {
-        using var reg = ct.Register(() => listener.Stop());
-        HttpListenerContext context;
-        try
+        // Add a 3-minute safety timeout in case the browser shows an error (e.g. redirect_mismatch)
+        // and the user never gets redirected back to our localhost listener.
+        using var timeoutCts = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+        using var reg = linkedCts.Token.Register(() => listener.Close());
+
+        // Loop until we receive a request that looks like an OAuth callback.
+        // The browser may fire ancillary requests (favicon.ico, etc.) before the real callback.
+        while (true)
         {
-            context = await listener.GetContextAsync();
-        }
-        catch (HttpListenerException) when (ct.IsCancellationRequested)
-        {
-            return new CallbackResult { Error = "Cancelled" };
-        }
+            HttpListenerContext context;
+            try
+            {
+                context = await listener.GetContextAsync();
+            }
+            catch (HttpListenerException) when (linkedCts.Token.IsCancellationRequested)
+            {
+                if (timeoutCts.IsCancellationRequested)
+                    return new CallbackResult
+                    {
+                        Error = "SSO timed out waiting for browser callback. " +
+                                "This usually means the redirect URI 'http://localhost' is not registered " +
+                                "in the server's OAuth/Cognito app client. " +
+                                "An administrator must add 'http://localhost' to the allowed callback URLs."
+                    };
+                return new CallbackResult { Error = "Cancelled" };
+            }
 
-        var query = context.Request.Url?.Query ?? "";
-        var parameters = HttpUtility.ParseQueryString(query);
+            var query = context.Request.Url?.Query ?? "";
+            var parameters = HttpUtility.ParseQueryString(query);
+            var hasCode  = !string.IsNullOrEmpty(parameters["code"]);
+            var hasError = !string.IsNullOrEmpty(parameters["error"]);
 
-        // Respond to the browser
-        var error = parameters["error"];
-        string responseHtml;
-        if (!string.IsNullOrEmpty(error))
-        {
-            responseHtml = $"<html><body><h2>Login failed</h2><p>{HttpUtility.HtmlEncode(parameters["error_description"] ?? error)}</p></body></html>";
-        }
-        else
-        {
-            responseHtml = "<html><body><h2>Login successful</h2><p>You can close this window and return to the application.</p></body></html>";
-        }
+            // Not a callback request (e.g. favicon) — return 204 and keep waiting.
+            if (!hasCode && !hasError)
+            {
+                context.Response.StatusCode = 204;
+                context.Response.Close();
+                continue;
+            }
 
-        var buffer = Encoding.UTF8.GetBytes(responseHtml);
-        context.Response.ContentType = "text/html";
-        context.Response.ContentLength64 = buffer.Length;
-        await context.Response.OutputStream.WriteAsync(buffer, ct);
-        context.Response.Close();
+            // This is a callback request — check state BEFORE writing any response,
+            // since writing closes the response object and it cannot be reused.
+            var error = parameters["error"];
+            var returnedState = parameters["state"];
+            var code = parameters["code"];
 
-        if (!string.IsNullOrEmpty(error))
-            return new CallbackResult { Error = parameters["error_description"] ?? error };
+            // State mismatch: stale redirect from a previous session — skip and keep waiting.
+            if (string.IsNullOrEmpty(error) && returnedState != expectedState)
+            {
+                var skipHtml = Encoding.UTF8.GetBytes("<html><body><p>Waiting for authentication...</p></body></html>");
+                context.Response.StatusCode = 200;
+                context.Response.ContentType = "text/html";
+                context.Response.ContentLength64 = skipHtml.Length;
+                await context.Response.OutputStream.WriteAsync(skipHtml, ct);
+                context.Response.Close();
+                continue;
+            }
 
-        // Validate state to prevent CSRF
-        var returnedState = parameters["state"];
-        if (returnedState != expectedState)
-            return new CallbackResult { Error = "Invalid state parameter — possible CSRF attack" };
+            // State matches (or an error was returned) — respond to the browser and return result.
+            string responseHtml;
+            if (!string.IsNullOrEmpty(error))
+            {
+                responseHtml = $"<html><body><h2>Login failed</h2><p>{HttpUtility.HtmlEncode(parameters["error_description"] ?? error)}</p></body></html>";
+            }
+            else
+            {
+                responseHtml = "<html><body><h2>Login successful</h2><p>You can close this window and return to the application.</p></body></html>";
+            }
 
-        var code = parameters["code"];
-        if (string.IsNullOrEmpty(code))
-            return new CallbackResult { Error = "No authorization code received" };
+            var buffer = Encoding.UTF8.GetBytes(responseHtml);
+            context.Response.ContentType = "text/html";
+            context.Response.ContentLength64 = buffer.Length;
+            await context.Response.OutputStream.WriteAsync(buffer, ct);
+            context.Response.Close();
 
-        return new CallbackResult { Code = code };
+            if (!string.IsNullOrEmpty(error))
+                return new CallbackResult { Error = parameters["error_description"] ?? error };
+
+            if (string.IsNullOrEmpty(code))
+                return new CallbackResult { Error = "No authorization code received" };
+
+            return new CallbackResult { Code = code };
+        } // end while (true)
     }
 
     #endregion

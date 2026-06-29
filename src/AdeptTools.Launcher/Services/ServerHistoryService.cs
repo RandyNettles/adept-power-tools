@@ -13,6 +13,7 @@ public class ServerHistoryService
     private List<string> _entries = new();
 
     public IReadOnlyList<string> Entries => _entries;
+    public string? LastUserName { get; private set; }
 
     public void Load()
     {
@@ -20,18 +21,26 @@ public class ServerHistoryService
         {
             if (!File.Exists(SettingsPath)) return;
             var json = File.ReadAllText(SettingsPath);
-            var loaded = JsonSerializer.Deserialize<List<string>>(json);
+            var loaded = JsonSerializer.Deserialize<ServerHistoryData>(json);
             if (loaded is not null)
-                _entries = loaded;
+            {
+                _entries = loaded.ServerUrls ?? new List<string>();
+                LastUserName = loaded.LastUserName;
+            }
+            else
+            {
+                // Legacy: plain string array
+                var urls = JsonSerializer.Deserialize<List<string>>(json);
+                if (urls is not null) _entries = urls;
+            }
         }
         catch
         {
-            // Corrupt file — start fresh
             _entries = new List<string>();
         }
     }
 
-    public void Add(string serverUrl)
+    public void Add(string serverUrl, string? userName = null)
     {
         if (string.IsNullOrWhiteSpace(serverUrl)) return;
 
@@ -42,6 +51,9 @@ public class ServerHistoryService
         if (_entries.Count > MaxEntries)
             _entries.RemoveRange(MaxEntries, _entries.Count - MaxEntries);
 
+        if (!string.IsNullOrWhiteSpace(userName))
+            LastUserName = userName.Trim();
+
         Save();
     }
 
@@ -51,7 +63,8 @@ public class ServerHistoryService
         {
             var dir = Path.GetDirectoryName(SettingsPath)!;
             Directory.CreateDirectory(dir);
-            var json = JsonSerializer.Serialize(_entries, new JsonSerializerOptions { WriteIndented = true });
+            var data = new ServerHistoryData { ServerUrls = _entries, LastUserName = LastUserName };
+            var json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
             File.WriteAllText(SettingsPath, json);
         }
         catch
@@ -59,4 +72,10 @@ public class ServerHistoryService
             // Best-effort persistence
         }
     }
+}
+
+internal class ServerHistoryData
+{
+    public List<string>? ServerUrls { get; set; }
+    public string? LastUserName { get; set; }
 }

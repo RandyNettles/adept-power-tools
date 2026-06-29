@@ -36,4 +36,7 @@ public class MockAdeptAuthService : IAdeptAuthService
         AccessToken = $"mock-jwt-token-{Guid.NewGuid():N}";
         return Task.FromResult(new AuthResult(true, AccessToken: AccessToken));
     }
+
+    public Task<AuthResult> SelectUserAsync(string userId, string userName, CancellationToken ct = default)
+        => Task.FromResult(new AuthResult(false, "User selection is not applicable in mock mode."));
 }

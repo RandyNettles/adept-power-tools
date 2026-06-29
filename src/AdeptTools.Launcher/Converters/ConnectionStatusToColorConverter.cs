@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Windows;
 using System.Windows.Data;
 using System.Windows.Media;
 
@@ -23,6 +24,16 @@ public class ConnectionStatusToColorConverter : IValueConverter
     {
         throw new NotSupportedException();
     }
+}
+
+/// <summary>Collapses the element when Status != Connecting (used to show Cancel button only during SSO wait).</summary>
+public class ConnectingToVisibilityConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+        => value is ConnectionStatus.Connecting ? Visibility.Visible : Visibility.Collapsed;
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+        => throw new NotSupportedException();
 }
 
 public enum ConnectionStatus

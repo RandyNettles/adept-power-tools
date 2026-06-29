@@ -26,12 +26,26 @@ public sealed class ComSessionManager : IDisposable
     /// <summary>
     /// Connects to an Adept server via COM. Must be called before other operations.
     /// </summary>
-    public async Task<int> ConnectAsync(string serverUrl, string userId, string password, CancellationToken ct = default)
+    public async Task<int> ConnectAsync(string serverUrl, string userId, string? password, CancellationToken ct = default)
     {
+        // Use DBNull.Value for empty/null password to send VT_NULL to the COM SDK,
+        // which signals a direct Adept account login with no password.
+        // An empty string (VT_BSTR "") triggers Windows SSO in the Adept SDK.
+        object? sdkPassword = string.IsNullOrEmpty(password) ? DBNull.Value : (object)password;
         return await _runner.RunAsync(() =>
         {
-            _project = ComLifecycle.CreateInstance<INxProject>(ProjectProgId);
-            return _project.Connect(serverUrl, userId, password);
+            try
+            {
+                _project = ComLifecycle.CreateInstance<INxProject>(ProjectProgId);
+            }
+            catch (Exception ex) when (ex.HResult == unchecked((int)0x800401F3))
+            {
+                throw new InvalidOperationException(
+                    $"The Adept 11.X COM SDK is not installed on this machine. " +
+                    $"Install the Adept desktop client before using the COM backend. " +
+                    $"(ProgID '{ProjectProgId}' not found in registry)", ex);
+            }
+            return _project.Connect(serverUrl, userId, sdkPassword);
         }, ct);
     }
 

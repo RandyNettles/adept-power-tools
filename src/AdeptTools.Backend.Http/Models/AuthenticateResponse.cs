@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace AdeptTools.Backend.Http.Models;
@@ -36,4 +37,42 @@ public class AuthenticateResponse
 
     [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
+
+    /// <summary>
+    /// Nonce issued by the server with status-230 responses to correlate the
+    /// subsequent disambiguation call back to this pending SSO session.
+    /// </summary>
+    [JsonPropertyName("sso_nonce")]
+    public string? SsoNonce { get; set; }
+
+    /// <summary>
+    /// The server sends the user list as an escaped JSON string OR a JSON array for status 230.
+    /// Captured as JsonElement so we can handle both forms.
+    /// </summary>
+    [JsonPropertyName("data")]
+    public JsonElement DataRaw { get; set; }
+
+    private static readonly JsonSerializerOptions CaseInsensitive = new() { PropertyNameCaseInsensitive = true };
+
+    public List<UserSelectionItem>? GetUserSelectionItems()
+    {
+        try
+        {
+            switch (DataRaw.ValueKind)
+            {
+                case JsonValueKind.Array:
+                    return DataRaw.Deserialize<List<UserSelectionItem>>(CaseInsensitive);
+
+                case JsonValueKind.String:
+                    var s = DataRaw.GetString();
+                    if (!string.IsNullOrWhiteSpace(s))
+                        return JsonSerializer.Deserialize<List<UserSelectionItem>>(s, CaseInsensitive);
+                    break;
+            }
+        }
+        catch { }
+
+        return null;
+    }
 }
+

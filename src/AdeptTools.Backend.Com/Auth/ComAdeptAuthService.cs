@@ -25,7 +25,7 @@ public class ComAdeptAuthService : IAdeptAuthService
     /// </summary>
     public string? AccessToken => IsAuthenticated ? "com-session-active" : null;
 
-    public async Task<AuthResult> LoginAsync(string serverUrl, string userName, string password, CancellationToken ct = default)
+    public async Task<AuthResult> LoginAsync(string serverUrl, string userName, string password = "", CancellationToken ct = default)
     {
         try
         {
@@ -63,8 +63,20 @@ public class ComAdeptAuthService : IAdeptAuthService
         {
             return new AuthResult(
                 Success: false,
-                ErrorMessage: $"COM connection error: {ex.Message}");
+                ErrorMessage: BuildErrorMessage(ex));
         }
+    }
+
+    private static string BuildErrorMessage(Exception ex)
+    {
+        var parts = new List<string>();
+        var current = ex;
+        while (current is not null)
+        {
+            parts.Add(current.Message);
+            current = current.InnerException;
+        }
+        return string.Join(" → ", parts);
     }
 
     public async Task LogoutAsync(CancellationToken ct = default)
@@ -86,4 +98,7 @@ public class ComAdeptAuthService : IAdeptAuthService
             Success: false,
             ErrorMessage: "COM session is not connected."));
     }
+
+    public Task<AuthResult> SelectUserAsync(string userId, string userName, CancellationToken ct = default)
+        => Task.FromResult(new AuthResult(false, "User selection is not applicable for COM connections."));
 }

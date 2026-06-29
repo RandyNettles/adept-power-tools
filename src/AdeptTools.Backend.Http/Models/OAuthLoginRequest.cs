@@ -67,4 +67,7 @@ public class AccountLoginRequest
 
     [JsonPropertyName("userSelection")]
     public string UserSelection { get; set; } = "";
+
+    [JsonPropertyName("sso_nonce")]
+    public string? SsoNonce { get; set; }
 }

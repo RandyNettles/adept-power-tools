@@ -1,19 +1,23 @@
 using System.Collections.ObjectModel;
+using System.Windows;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using AdeptTools.Core.Auth;
 using AdeptTools.Core.Models;
+using AdeptTools.Launcher.Controls;
 using AdeptTools.Launcher.Converters;
+using AdeptTools.Launcher.Models;
 using AdeptTools.Launcher.Services;
 
 namespace AdeptTools.Launcher.ViewModels;
 
 public partial class ConnectViewModel : ObservableObject
 {
-    private readonly Func<IAdeptAuthService> _authServiceFactory;
+    private readonly Func<BackendType, IAdeptAuthService> _authServiceFactory;
     private readonly MockModeState _mockModeState;
     private readonly HttpClientConfig _httpClientConfig;
     private readonly ServerHistoryService _serverHistory;
+    private readonly ComProfileService _comProfileService;
     private string _password = string.Empty;
 
     public void SetPassword(string password) => _password = password;
@@ -31,8 +35,15 @@ public partial class ConnectViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ShowHttpFields))]
+    [NotifyPropertyChangedFor(nameof(ShowComFields))]
     [NotifyCanExecuteChangedFor(nameof(TestConnectionCommand))]
     private bool _isMockMode;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ShowComCredentials))]
+    [NotifyCanExecuteChangedFor(nameof(TestConnectionCommand))]
+    [NotifyCanExecuteChangedFor(nameof(EditComProfileCommand))]
+    private ComConnectionProfile? _selectedComProfile;
 
     [ObservableProperty]
     private ConnectionStatus _status = ConnectionStatus.Disconnected;
@@ -52,15 +63,24 @@ public partial class ConnectViewModel : ObservableObject
     private string? _errorMessage;
 
     public bool ShowHttpFields => SelectedBackend == BackendType.Http && !IsMockMode;
+    public bool ShowComFields => SelectedBackend == BackendType.Com && !IsMockMode;
+    public bool ShowComCredentials => ShowComFields && SelectedComProfile is not null;
 
     public ObservableCollection<string> ServerUrlHistory { get; } = new();
+    public ObservableCollection<ComConnectionProfile> ComProfiles { get; } = new();
 
-    public ConnectViewModel(Func<IAdeptAuthService> authServiceFactory, MockModeState mockModeState, HttpClientConfig httpClientConfig, ServerHistoryService serverHistory)
+    public ConnectViewModel(
+        Func<BackendType, IAdeptAuthService> authServiceFactory,
+        MockModeState mockModeState,
+        HttpClientConfig httpClientConfig,
+        ServerHistoryService serverHistory,
+        ComProfileService comProfileService)
     {
         _authServiceFactory = authServiceFactory;
         _mockModeState = mockModeState;
         _httpClientConfig = httpClientConfig;
         _serverHistory = serverHistory;
+        _comProfileService = comProfileService;
         _isMockMode = _mockModeState.IsMock;
 
         _serverHistory.Load();
@@ -70,15 +90,32 @@ public partial class ConnectViewModel : ObservableObject
         if (ServerUrlHistory.Count > 0)
             _serverUrl = ServerUrlHistory[0];
 
+        if (!string.IsNullOrWhiteSpace(_serverHistory.LastUserName))
+            _userName = _serverHistory.LastUserName;
+
+        _comProfileService.Load();
+        RefreshComProfiles();
+
         _mockModeState.Changed += (_, isMock) =>
         {
             IsMockMode = isMock;
         };
     }
 
+    private void RefreshComProfiles()
+    {
+        var current = SelectedComProfile;
+        ComProfiles.Clear();
+        foreach (var p in _comProfileService.Profiles)
+            ComProfiles.Add(p);
+        SelectedComProfile = ComProfiles.FirstOrDefault(p => p.Name == current?.Name) ?? ComProfiles.FirstOrDefault();
+    }
+
     partial void OnSelectedBackendChanged(BackendType value)
     {
         OnPropertyChanged(nameof(ShowHttpFields));
+        OnPropertyChanged(nameof(ShowComFields));
+        OnPropertyChanged(nameof(ShowComCredentials));
         TestConnectionCommand.NotifyCanExecuteChanged();
         ResetConnectionStatus();
     }
@@ -92,12 +129,13 @@ public partial class ConnectViewModel : ObservableObject
     private bool CanTestConnection()
     {
         if (IsMockMode) return true;
-        if (SelectedBackend == BackendType.Com) return true;
+        if (SelectedBackend == BackendType.Com)
+            return SelectedComProfile is not null && !string.IsNullOrWhiteSpace(UserName);
         return !string.IsNullOrWhiteSpace(ServerUrl) && !string.IsNullOrWhiteSpace(UserName);
     }
 
     [RelayCommand(CanExecute = nameof(CanTestConnection))]
-    private async Task TestConnectionAsync()
+    private async Task TestConnectionAsync(CancellationToken ct)
     {
         Status = ConnectionStatus.Connecting;
         StatusText = "Connecting...";
@@ -107,11 +145,42 @@ public partial class ConnectViewModel : ObservableObject
 
         try
         {
-            var authService = _authServiceFactory();
-            var url = IsMockMode ? "mock://localhost" : ServerUrl;
+            var authService = _authServiceFactory(SelectedBackend);
+            var url = IsMockMode ? "mock://localhost"
+                : SelectedBackend == BackendType.Com ? SelectedComProfile!.Address
+                : ServerUrl;
             var user = IsMockMode ? "mock-user" : UserName;
 
-            var result = await authService.LoginAsync(url, user, _password);
+            var result = await authService.LoginAsync(url, user, _password, ct);
+
+            // Server has multiple Adept accounts linked to this identity — ask the user to pick one.
+            if (result.RequiresUserSelection)
+            {
+                if (result.UserChoices is null || result.UserChoices.Count == 0)
+                {
+                    Status = ConnectionStatus.Error;
+                    StatusText = "Connection failed";
+                    ErrorMessage = "Multiple Adept accounts are linked to your identity but the account list could not be read from the server response. Please contact your administrator.";
+                    return;
+                }
+
+                var dialogVm = new UserSelectionDialogViewModel(result.UserChoices);
+                var dialog = new Controls.UserSelectionDialog
+                {
+                    DataContext = dialogVm,
+                    Owner = System.Windows.Application.Current.MainWindow
+                };
+                dialog.ShowDialog();
+
+                if (!dialogVm.Confirmed || dialogVm.SelectedUser is null)
+                {
+                    Status = ConnectionStatus.Disconnected;
+                    StatusText = "Not connected";
+                    return;
+                }
+
+                result = await authService.SelectUserAsync(dialogVm.SelectedUser.Id, dialogVm.SelectedUser.UserName, ct);
+            }
 
             if (result.Success)
             {
@@ -127,7 +196,7 @@ public partial class ConnectViewModel : ObservableObject
                 // Remember successful server URL
                 if (!IsMockMode)
                 {
-                    _serverHistory.Add(url);
+                    _serverHistory.Add(url, user);
                     ServerUrlHistory.Clear();
                     foreach (var entry in _serverHistory.Entries)
                         ServerUrlHistory.Add(entry);
@@ -160,5 +229,37 @@ public partial class ConnectViewModel : ObservableObject
     partial void OnStatusChanged(ConnectionStatus value)
     {
         StatusChanged?.Invoke(this, value);
+    }
+
+    [RelayCommand]
+    private void AddComProfile()
+    {
+        var vm = new ComProfileDialogViewModel();
+        var dialog = new ComProfileDialog { DataContext = vm, Owner = Application.Current.MainWindow };
+        dialog.ShowDialog();
+        if (vm.DialogResult == true)
+        {
+            _comProfileService.Add(vm.ToProfile());
+            RefreshComProfiles();
+            SelectedComProfile = ComProfiles.LastOrDefault();
+        }
+    }
+
+    private bool CanEditComProfile() => SelectedComProfile is not null;
+
+    [RelayCommand(CanExecute = nameof(CanEditComProfile))]
+    private void EditComProfile()
+    {
+        if (SelectedComProfile is null) return;
+        var vm = new ComProfileDialogViewModel(SelectedComProfile);
+        var dialog = new ComProfileDialog { DataContext = vm, Owner = Application.Current.MainWindow };
+        dialog.ShowDialog();
+        if (vm.DialogResult == true)
+        {
+            _comProfileService.Update(SelectedComProfile, vm.ToProfile());
+            var name = vm.ToProfile().Name;
+            RefreshComProfiles();
+            SelectedComProfile = ComProfiles.FirstOrDefault(p => p.Name == name) ?? ComProfiles.FirstOrDefault();
+        }
     }
 }

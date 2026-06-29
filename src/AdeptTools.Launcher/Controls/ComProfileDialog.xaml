@@ -1,0 +1,121 @@
+<Window x:Class="AdeptTools.Launcher.Controls.ComProfileDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:AdeptTools.Launcher.ViewModels"
+        Title="{Binding WindowTitle}"
+        Width="400" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Background="{StaticResource NeutralWhiteBrush}"
+        FontFamily="{StaticResource FontFamilyPrimary}">
+
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="8" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+
+        <!-- Form Fields -->
+        <StackPanel Grid.Row="0" Grid.Column="0">
+
+            <!-- Name -->
+            <TextBlock Text="Name"
+                       FontSize="{StaticResource FontSizeCaption2}"
+                       FontWeight="{StaticResource FontWeightMedium}"
+                       Foreground="{StaticResource Neutral600Brush}"
+                       Margin="0,0,0,4" />
+            <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}"
+                     Style="{StaticResource DefaultTextBoxStyle}"
+                     Margin="0,0,0,12" />
+
+            <!-- Server Name -->
+            <TextBlock Text="Server Name"
+                       FontSize="{StaticResource FontSizeCaption2}"
+                       FontWeight="{StaticResource FontWeightMedium}"
+                       Foreground="{StaticResource Neutral600Brush}"
+                       Margin="0,0,0,4" />
+            <TextBox Text="{Binding ServerName, UpdateSourceTrigger=PropertyChanged}"
+                     Style="{StaticResource DefaultTextBoxStyle}"
+                     Margin="0,0,0,12" />
+
+            <!-- Protocol and Port -->
+            <Grid Margin="0,0,0,12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="16" />
+                    <ColumnDefinition Width="80" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0">
+                    <TextBlock Text="Protocol"
+                               FontSize="{StaticResource FontSizeCaption2}"
+                               FontWeight="{StaticResource FontWeightMedium}"
+                               Foreground="{StaticResource Neutral600Brush}"
+                               Margin="0,0,0,6" />
+                    <StackPanel Orientation="Horizontal">
+                        <RadioButton Content="TCPIP"
+                                     IsChecked="{Binding IsTcpIp}"
+                                     GroupName="Protocol"
+                                     VerticalAlignment="Center"
+                                     Margin="0,0,12,0" />
+                        <RadioButton Content="HTTP"
+                                     IsChecked="{Binding IsHttp}"
+                                     GroupName="Protocol"
+                                     VerticalAlignment="Center"
+                                     Margin="0,0,12,0" />
+                        <RadioButton Content="HTTPS"
+                                     IsChecked="{Binding IsHttps}"
+                                     GroupName="Protocol"
+                                     VerticalAlignment="Center" />
+                    </StackPanel>
+                </StackPanel>
+
+                <StackPanel Grid.Column="2">
+                    <TextBlock Text="Port"
+                               FontSize="{StaticResource FontSizeCaption2}"
+                               FontWeight="{StaticResource FontWeightMedium}"
+                               Foreground="{StaticResource Neutral600Brush}"
+                               Margin="0,0,0,4" />
+                    <TextBox Text="{Binding Port, UpdateSourceTrigger=PropertyChanged}"
+                             Style="{StaticResource DefaultTextBoxStyle}" />
+                </StackPanel>
+            </Grid>
+
+            <!-- Address (read-only) -->
+            <TextBlock Text="Address"
+                       FontSize="{StaticResource FontSizeCaption2}"
+                       FontWeight="{StaticResource FontWeightMedium}"
+                       Foreground="{StaticResource Neutral600Brush}"
+                       Margin="0,0,0,4" />
+            <TextBox Text="{Binding Address, Mode=OneWay}"
+                     Style="{StaticResource DefaultTextBoxStyle}"
+                     IsReadOnly="True"
+                     Background="{StaticResource NeutralBgBrush}"
+                     Margin="0,0,0,0" />
+
+        </StackPanel>
+
+        <!-- Action Buttons (right column) -->
+        <StackPanel Grid.Row="0" Grid.Column="2" VerticalAlignment="Top">
+            <Button Content="OK"
+                    Command="{Binding OkCommand}"
+                    Style="{StaticResource PrimaryButtonStyle}"
+                    Width="72"
+                    Margin="0,0,0,4" />
+            <Button Content="Cancel"
+                    Command="{Binding CancelCommand}"
+                    Style="{StaticResource SecondaryButtonStyle}"
+                    Width="72"
+                    Margin="0,0,0,4" />
+        </StackPanel>
+
+    </Grid>
+</Window>

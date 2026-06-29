@@ -16,4 +16,12 @@ public class CognitoSettingsResponse
 
     [JsonPropertyName("scope")]
     public string? Scope { get; set; }
+
+    /// <summary>
+    /// Server-registered redirect URI for this Cognito app client, if provided.
+    /// When present, the Adept server acts as the OAuth relay and handles the
+    /// Cognito callback; use this URI in the authorize URL instead of localhost.
+    /// </summary>
+    [JsonPropertyName("redirectUri")]
+    public string? RedirectUri { get; set; }
 }

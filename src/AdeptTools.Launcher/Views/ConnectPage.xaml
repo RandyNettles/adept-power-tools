@@ -2,10 +2,12 @@
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              xmlns:converters="clr-namespace:AdeptTools.Launcher.Converters"
-             xmlns:models="clr-namespace:AdeptTools.Core.Models;assembly=AdeptTools.Core">
+             xmlns:models="clr-namespace:AdeptTools.Core.Models;assembly=AdeptTools.Core"
+             xmlns:launcherModels="clr-namespace:AdeptTools.Launcher.Models">
     <UserControl.Resources>
         <converters:BoolToVisibilityConverter x:Key="BoolToVis" />
         <converters:ConnectionStatusToColorConverter x:Key="StatusColorConverter" />
+        <converters:ConnectingToVisibilityConverter x:Key="ConnectingVisConverter" />
     </UserControl.Resources>
 
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
@@ -39,6 +41,73 @@
                         <ComboBoxItem Content="HTTP (12.X)" Tag="{x:Static models:BackendType.Http}" />
                         <ComboBoxItem Content="COM (11.X)" Tag="{x:Static models:BackendType.Com}" />
                     </ComboBox>
+
+                    <!-- COM Fields (hidden when not COM or Mock) -->
+                    <StackPanel Visibility="{Binding ShowComFields, Converter={StaticResource BoolToVis}}">
+
+                        <TextBlock Text="Data Source Profile"
+                                   FontSize="{StaticResource FontSizeCaption2}"
+                                   FontWeight="{StaticResource FontWeightMedium}"
+                                   Foreground="{StaticResource Neutral600Brush}"
+                                   Margin="0,0,0,6" />
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="4" />
+                                <ColumnDefinition Width="Auto" />
+                                <ColumnDefinition Width="4" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <ComboBox Grid.Column="0"
+                                      ItemsSource="{Binding ComProfiles}"
+                                      SelectedItem="{Binding SelectedComProfile}"
+                                      DisplayMemberPath="Name"
+                                      Style="{StaticResource DefaultComboBoxStyle}" />
+                            <Button Grid.Column="2"
+                                    Content="New"
+                                    Command="{Binding AddComProfileCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}" />
+                            <Button Grid.Column="4"
+                                    Content="Edit"
+                                    Command="{Binding EditComProfileCommand}"
+                                    Style="{StaticResource SecondaryButtonStyle}" />
+                        </Grid>
+
+                        <!-- Address preview -->
+                        <TextBlock Text="{Binding SelectedComProfile.Address, StringFormat='Address: {0}'}"
+                                   FontSize="{StaticResource FontSizeCaption2}"
+                                   Foreground="{StaticResource Neutral400Brush}"
+                                   FontStyle="Italic"
+                                   Margin="0,0,0,16" />
+
+                        <!-- COM Username -->
+                        <StackPanel Visibility="{Binding ShowComCredentials, Converter={StaticResource BoolToVis}}">
+                            <TextBlock Text="Username"
+                                       FontSize="{StaticResource FontSizeCaption2}"
+                                       FontWeight="{StaticResource FontWeightMedium}"
+                                       Foreground="{StaticResource Neutral600Brush}"
+                                       Margin="0,0,0,6" />
+                            <TextBox Text="{Binding UserName, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource DefaultTextBoxStyle}"
+                                     Margin="0,0,0,16" />
+
+                            <TextBlock Text="Password"
+                                       FontSize="{StaticResource FontSizeCaption2}"
+                                       FontWeight="{StaticResource FontWeightMedium}"
+                                       Foreground="{StaticResource Neutral600Brush}"
+                                       Margin="0,0,0,6" />
+                            <PasswordBox x:Name="ComPasswordBox"
+                                         Style="{StaticResource DefaultPasswordBoxStyle}"
+                                         PasswordChanged="PasswordBox_PasswordChanged"
+                                         Margin="0,0,0,4" />
+                            <TextBlock Text="Leave blank for accounts with no password"
+                                       FontSize="{StaticResource FontSizeCaption2}"
+                                       Foreground="{StaticResource Neutral400Brush}"
+                                       FontStyle="Italic"
+                                       Margin="0,0,0,16" />
+                        </StackPanel>
+
+                    </StackPanel>
 
                     <!-- HTTP Fields (hidden when COM or Mock) -->
                     <StackPanel Visibility="{Binding ShowHttpFields, Converter={StaticResource BoolToVis}}">
@@ -110,11 +179,16 @@
                     </Border>
 
                     <!-- Test Connection Button -->
-                    <Button Content="Test Connection"
-                            Command="{Binding TestConnectionCommand}"
-                            Style="{StaticResource PrimaryButtonStyle}"
-                            HorizontalAlignment="Left"
-                            Margin="0,0,0,16" />
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
+                        <Button Content="Test Connection"
+                                Command="{Binding TestConnectionCommand}"
+                                Style="{StaticResource PrimaryButtonStyle}" />
+                        <Button Content="Cancel"
+                                Command="{Binding CancelTestConnectionCommand}"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Margin="8,0,0,0"
+                                Visibility="{Binding Status, Converter={StaticResource ConnectingVisConverter}}" />
+                    </StackPanel>
 
                     <!-- Status Indicator -->
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
@@ -156,10 +230,16 @@
                             BorderThickness="1"
                             CornerRadius="{StaticResource RadiusDefault}"
                             Padding="12" Margin="0,12,0,0">
-                        <TextBlock Text="{Binding ErrorMessage}"
-                                   FontSize="{StaticResource FontSizeBody1}"
-                                   Foreground="{StaticResource ErrorTextBrush}"
-                                   TextWrapping="Wrap" />
+                        <StackPanel>
+                            <TextBox Text="{Binding ErrorMessage, Mode=OneWay}"
+                                     FontSize="{StaticResource FontSizeBody1}"
+                                     Foreground="{StaticResource ErrorTextBrush}"
+                                     Background="Transparent"
+                                     BorderThickness="0"
+                                     IsReadOnly="True"
+                                     TextWrapping="Wrap"
+                                     IsTabStop="False" />
+                        </StackPanel>
                     </Border>
 
                 </StackPanel>

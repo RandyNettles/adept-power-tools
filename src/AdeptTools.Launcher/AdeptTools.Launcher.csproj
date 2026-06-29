@@ -19,6 +19,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\AdeptTools.Core\AdeptTools.Core.csproj" />
+    <ProjectReference Include="..\AdeptTools.Backend.Com\AdeptTools.Backend.Com.csproj" />
     <ProjectReference Include="..\AdeptTools.Backend.Http\AdeptTools.Backend.Http.csproj" />
     <ProjectReference Include="..\AdeptTools.Workflow\AdeptTools.Workflow.csproj" />
     <ProjectReference Include="..\AdeptTools.Import\AdeptTools.Import.csproj" />

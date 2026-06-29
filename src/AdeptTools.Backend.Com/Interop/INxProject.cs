@@ -20,7 +20,7 @@ public interface INxProject
     string ServerUrl { get; }
     bool IsConnected { get; }
 
-    int Connect(string serverUrl, string userId, string password);
+    int Connect(string serverUrl, string userId, object? password);
     void Disconnect();
     INxDb GetDatabase();
     INxWorkflowAdmin GetWorkflowAdmin();
