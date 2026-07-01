@@ -52,8 +52,20 @@
   - File: docs/design/user-flows/UF-US-AUTH-006-Secure-Session-Resume-Client.md
   - Source story: docs/prd/user_stories/US-Auth-Session.md
   - Source requirements: FR-021, FR-022 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
-- UF-US-WF-006: Client Workflow Operations
+- UF-US-WF-006: Client Workflow Operations (Overview)
   - File: docs/design/user-flows/UF-US-WF-006-Client-Workflow-Operations.md
+  - Source story: docs/prd/user_stories/US-Workflow.md
+  - Source requirement: FR-031 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
+- UF-US-WF-006a: Client Workflow Create
+  - File: docs/design/user-flows/UF-US-WF-006a-Client-Workflow-Create.md
+  - Source story: docs/prd/user_stories/US-Workflow.md
+  - Source requirement: FR-031 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
+- UF-US-WF-006b: Client Workflow Modify
+  - File: docs/design/user-flows/UF-US-WF-006b-Client-Workflow-Modify.md
+  - Source story: docs/prd/user_stories/US-Workflow.md
+  - Source requirement: FR-031 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
+- UF-US-WF-006c: Client Workflow Delete
+  - File: docs/design/user-flows/UF-US-WF-006c-Client-Workflow-Delete.md
   - Source story: docs/prd/user_stories/US-Workflow.md
   - Source requirement: FR-031 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
 - UF-US-IMP-007: Client Import Operations

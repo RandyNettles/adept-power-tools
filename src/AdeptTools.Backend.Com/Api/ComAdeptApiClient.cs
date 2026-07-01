@@ -10,38 +10,36 @@ namespace AdeptTools.Backend.Com.Api;
 /// </summary>
 public class ComAdeptApiClient : IAdeptApiClient
 {
-    private readonly ComOperationRunner _runner;
-    private readonly ComSessionManager _session;
+    private readonly ILegacyCoreApiSession _legacySession;
 
-    public ComAdeptApiClient(ComOperationRunner runner, ComSessionManager session)
+    public ComAdeptApiClient(ILegacyCoreApiSession legacySession)
     {
-        _runner = runner;
-        _session = session;
+        _legacySession = legacySession;
     }
 
     public async Task<UserInfo> GetUserInfoAsync(CancellationToken ct = default)
     {
-        var project = _session.GetProject();
+        var info = await _legacySession.GetSessionInfoAsync(ct);
 
-        return await _runner.RunAsync(() => new UserInfo
+        return new UserInfo
         {
-            UserId = project.UserId,
-            UserName = project.UserName,
-            DisplayName = project.DisplayName,
-            EmailAddress = project.EmailAddress,
-            AppVersion = project.AppVersion,
-            WorkAreaId = project.WorkAreaId
-        }, ct);
+            UserId = info.UserId,
+            UserName = info.UserName,
+            DisplayName = info.DisplayName,
+            EmailAddress = info.EmailAddress,
+            AppVersion = info.AppVersion,
+            WorkAreaId = info.WorkAreaId
+        };
     }
 
     public Task<bool> IsLoggedInAsync(CancellationToken ct = default)
     {
-        return Task.FromResult(_session.IsConnected);
+        return Task.FromResult(_legacySession.IsConnected);
     }
 
     public async Task<string> GetServerVersionAsync(CancellationToken ct = default)
     {
-        var project = _session.GetProject();
-        return await _runner.RunAsync(() => project.AppVersion, ct);
+        var info = await _legacySession.GetSessionInfoAsync(ct);
+        return info.AppVersion ?? "LegacyCoreApi";
     }
 }

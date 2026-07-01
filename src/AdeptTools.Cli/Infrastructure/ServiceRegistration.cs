@@ -61,8 +61,10 @@ public static class ServiceRegistration
         }
         else if (backend == BackendType.Com)
         {
+            services.AddSingleton<LegacyComFeatureFlags>();
             services.AddSingleton<ComOperationRunner>();
             services.AddSingleton<ComSessionManager>();
+            services.AddSingleton<ILegacyCoreApiSession, LegacyCoreApiSession>();
             services.AddSingleton<IAdeptAuthService, ComAdeptAuthService>();
             services.AddSingleton<IAdeptApiClient, ComAdeptApiClient>();
             services.AddSingleton<IWorkflowApiClient, ComWorkflowApiClient>();

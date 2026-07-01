@@ -1,9 +1,10 @@
 using AdeptTools.Backend.Com.Infrastructure;
-using AdeptTools.Backend.Com.Interop;
 using AdeptTools.Core.Models;
 using AdeptTools.Workflow.Api;
 using AdeptTools.Workflow.Input;
 using AdeptTools.Workflow.Models;
+using System.Reflection;
+using System.Runtime.InteropServices;
 
 namespace AdeptTools.Backend.Com.Api;
 
@@ -13,69 +14,72 @@ namespace AdeptTools.Backend.Com.Api;
 /// </summary>
 public class ComWorkflowApiClient : IWorkflowApiClient
 {
-    private readonly ComOperationRunner _runner;
-    private readonly ComSessionManager _session;
+    private readonly ILegacyCoreApiSession _legacySession;
+    private readonly LegacyComFeatureFlags _flags;
 
-    public ComWorkflowApiClient(ComOperationRunner runner, ComSessionManager session)
+    public ComWorkflowApiClient(ILegacyCoreApiSession legacySession, LegacyComFeatureFlags flags)
     {
-        _runner = runner;
-        _session = session;
+        _legacySession = legacySession;
+        _flags = flags;
+    }
+
+    private void EnsureWorkflowEnabled()
+    {
+        if (!_flags.EnableLegacyWorkflow)
+        {
+            throw new NotSupportedException(
+                "Legacy COM workflow phase is currently disabled. Set ADEPTTOOLS_LEGACYCOM_WORKFLOW=true to enable it.");
+        }
     }
 
     public async Task<WorkflowSetup> GetSetupAsync(CancellationToken ct = default)
     {
-        var admin = await _session.GetWorkflowAdminAsync(ct);
+        EnsureWorkflowEnabled();
+        var admin = await GetWorkflowAdminDispatchAsync(ct);
 
-        return await _runner.RunAsync(() => new WorkflowSetup
+        return new WorkflowSetup
         {
-            MaximumLengthWorkflowName = admin.MaxWorkflowNameLength,
-            MaximumLengthStepName = admin.MaxStepNameLength,
-            MaximumWorkflowSteps = admin.MaxWorkflowSteps,
-            MaximumWorkflows = admin.MaxWorkflows
-        }, ct);
+            MaximumLengthWorkflowName = InvokeGetInt(admin, "MaxWorkflowNameLength"),
+            MaximumLengthStepName = InvokeGetInt(admin, "MaxStepNameLength"),
+            MaximumWorkflowSteps = InvokeGetInt(admin, "MaxWorkflowSteps"),
+            MaximumWorkflows = InvokeGetInt(admin, "MaxWorkflows")
+        };
     }
 
     public async Task<WorkflowAdminPacket> GetWorkflowsAsync(CancellationToken ct = default)
     {
-        var admin = await _session.GetWorkflowAdminAsync(ct);
-        var project = _session.GetProject();
+        EnsureWorkflowEnabled();
+        var admin = await GetWorkflowAdminDispatchAsync(ct);
+        var info = await _legacySession.GetSessionInfoAsync(ct);
 
-        return await _runner.RunAsync(() =>
+        var packet = new WorkflowAdminPacket
         {
-            var packet = new WorkflowAdminPacket
-            {
-                CurrentUserId = project.UserId,
-                WfNameLen = admin.MaxWorkflowNameLength,
-                WfStepNameLen = admin.MaxStepNameLength,
-                Workflows = new List<WorkflowAdminItem>()
-            };
+            CurrentUserId = info.UserId,
+            WfNameLen = InvokeGetInt(admin, "MaxWorkflowNameLength"),
+            WfStepNameLen = InvokeGetInt(admin, "MaxStepNameLength"),
+            Workflows = new List<WorkflowAdminItem>()
+        };
 
-            for (var i = 0; i < admin.WorkflowCount; i++)
+        var count = InvokeGetInt(admin, "WorkflowCount");
+        for (var i = 0; i < count; i++)
+        {
+            var wfInfo = InvokeMethod(admin, "GetWorkflowInfo", i);
+            packet.Workflows.Add(new WorkflowAdminItem
             {
-                var info = admin.GetWorkflowInfo(i);
-                try
-                {
-                    packet.Workflows.Add(new WorkflowAdminItem
-                    {
-                        WorkflowId = info.WorkflowId,
-                        WorkflowName = info.Name,
-                        Active = info.Active,
-                        StepCount = info.StepCount,
-                        InProcessCount = info.InProcessCount,
-                        Edit = info.CanEdit,
-                        Share = info.CanShare,
-                        Delete = info.CanDelete,
-                        LockedByDisplayName = info.LockedByDisplayName
-                    });
-                }
-                finally
-                {
-                    ComLifecycle.Release(ref info);
-                }
-            }
+                WorkflowId = InvokeGetString(wfInfo, "WorkflowId"),
+                WorkflowName = InvokeGetString(wfInfo, "Name"),
+                Active = InvokeGetBool(wfInfo, "Active"),
+                StepCount = InvokeGetInt(wfInfo, "StepCount"),
+                InProcessCount = InvokeGetInt(wfInfo, "InProcessCount"),
+                Edit = InvokeGetBool(wfInfo, "CanEdit"),
+                Share = InvokeGetBool(wfInfo, "CanShare"),
+                Delete = InvokeGetBool(wfInfo, "CanDelete"),
+                LockedByDisplayName = InvokeGetString(wfInfo, "LockedByDisplayName")
+            });
+            ReleaseCom(ref wfInfo);
+        }
 
-            return packet;
-        }, ct);
+        return packet;
     }
 
     public Task<WorkflowAdminPacket> GetWorkflowsBasicAsync(CancellationToken ct = default)
@@ -86,186 +90,159 @@ public class ComWorkflowApiClient : IWorkflowApiClient
 
     public async Task<WorkflowEditModel> CreateNewAsync(CancellationToken ct = default)
     {
-        var admin = await _session.GetWorkflowAdminAsync(ct);
+        EnsureWorkflowEnabled();
+        var admin = await GetWorkflowAdminDispatchAsync(ct);
 
-        return await _runner.RunAsync(() =>
+        var nxWf = InvokeMethod(admin, "CreateNewWorkflow");
+        try
         {
-            var nxWf = admin.CreateNewWorkflow();
-            try
-            {
-                return MapWorkflowToEditModel(nxWf);
-            }
-            finally
-            {
-                ComLifecycle.Release(ref nxWf);
-            }
-        }, ct);
+            return MapWorkflowToEditModel(nxWf);
+        }
+        finally
+        {
+            ReleaseCom(ref nxWf);
+        }
     }
 
     public async Task<WorkflowEditModel> GetWorkflowAsync(string workflowId, CancellationToken ct = default)
     {
-        var admin = await _session.GetWorkflowAdminAsync(ct);
+        EnsureWorkflowEnabled();
+        var admin = await GetWorkflowAdminDispatchAsync(ct);
 
-        return await _runner.RunAsync(() =>
+        var nxWf = InvokeMethod(admin, "OpenWorkflow", workflowId);
+        try
         {
-            var nxWf = admin.OpenWorkflow(workflowId);
-            try
-            {
-                return MapWorkflowToEditModel(nxWf);
-            }
-            finally
-            {
-                ComLifecycle.Release(ref nxWf);
-            }
-        }, ct);
+            return MapWorkflowToEditModel(nxWf);
+        }
+        finally
+        {
+            ReleaseCom(ref nxWf);
+        }
     }
 
     public async Task<ApiResult> SaveWorkflowAsync(WorkflowEditModel model, CancellationToken ct = default)
     {
-        var admin = await _session.GetWorkflowAdminAsync(ct);
+        EnsureWorkflowEnabled();
+        var admin = await GetWorkflowAdminDispatchAsync(ct);
 
-        return await _runner.RunAsync(() =>
+        var nxWf = InvokeMethod(admin, "OpenWorkflow", model.WorkflowDefinition.WorkflowId);
+        try
         {
-            var nxWf = admin.OpenWorkflow(model.WorkflowDefinition.WorkflowId);
-            try
+            // Apply workflow-level properties
+            InvokeSet(nxWf, "Name", model.WorkflowDefinition.Name);
+            InvokeSet(nxWf, "Memo", model.WorkflowDefinition.Memo ?? string.Empty);
+            InvokeSet(nxWf, "Active", true);
+            InvokeSet(nxWf, "DoEmailNotify", model.WorkflowDefinition.BDoEmailNotify);
+            InvokeSet(nxWf, "TimeoutOn", model.WorkflowDefinition.BTimeoutOn);
+            InvokeSet(nxWf, "RecurringTimeoutOn", model.WorkflowDefinition.BRecurringTimeoutOn);
+            InvokeSet(nxWf, "Timeout", model.WorkflowDefinition.Timeout ?? string.Empty);
+            InvokeSet(nxWf, "RecurringTimeout", model.WorkflowDefinition.RecurringTimeout ?? string.Empty);
+            InvokeSet(nxWf, "TimeoutIncludeSaturday", model.WorkflowDefinition.BTimeoutIncludeSaturday);
+            InvokeSet(nxWf, "TimeoutIncludeSunday", model.WorkflowDefinition.BTimeoutIncludeSunday);
+
+            // Apply step-level properties
+            var stepCount = InvokeGetInt(nxWf, "StepCount");
+            for (var i = 0; i < model.WorkflowStepModels.Count && i < stepCount; i++)
             {
-                // Apply workflow-level properties
-                nxWf.Name = model.WorkflowDefinition.Name;
-                nxWf.Memo = model.WorkflowDefinition.Memo ?? string.Empty;
-                nxWf.Active = true; // Controlled at definition level
-                nxWf.DoEmailNotify = model.WorkflowDefinition.BDoEmailNotify;
-                nxWf.TimeoutOn = model.WorkflowDefinition.BTimeoutOn;
-                nxWf.RecurringTimeoutOn = model.WorkflowDefinition.BRecurringTimeoutOn;
-                nxWf.Timeout = model.WorkflowDefinition.Timeout ?? string.Empty;
-                nxWf.RecurringTimeout = model.WorkflowDefinition.RecurringTimeout ?? string.Empty;
-                nxWf.TimeoutIncludeSaturday = model.WorkflowDefinition.BTimeoutIncludeSaturday;
-                nxWf.TimeoutIncludeSunday = model.WorkflowDefinition.BTimeoutIncludeSunday;
+                var stepModel = model.WorkflowStepModels[i];
+                if (stepModel.BDeleted) continue;
 
-                // Apply step-level properties
-                for (var i = 0; i < model.WorkflowStepModels.Count && i < nxWf.StepCount; i++)
-                {
-                    var stepModel = model.WorkflowStepModels[i];
-                    if (stepModel.BDeleted) continue;
-
-                    var nxStep = nxWf.GetStep(i);
-                    try
-                    {
-                        ApplyStepProperties(nxStep, stepModel);
-                    }
-                    finally
-                    {
-                        ComLifecycle.Release(ref nxStep);
-                    }
-                }
-
-                var saveResult = nxWf.Save();
-                return saveResult == 0
-                    ? ApiResult.Success("Workflow saved via COM.")
-                    : ApiResult.Failure(saveResult, $"COM Save failed with code {saveResult}.");
+                var nxStep = InvokeMethod(nxWf, "GetStep", i);
+                ApplyStepProperties(nxStep, stepModel);
+                ReleaseCom(ref nxStep);
             }
-            finally
-            {
-                ComLifecycle.Release(ref nxWf);
-            }
-        }, ct);
+
+            var saveResult = Convert.ToInt32(InvokeMethod(nxWf, "Save"));
+            return saveResult == 0
+                ? ApiResult.Success("Workflow saved via COM.")
+                : ApiResult.Failure(saveResult, $"COM Save failed with code {saveResult}.");
+        }
+        finally
+        {
+            ReleaseCom(ref nxWf);
+        }
     }
 
     public async Task<ApiResult> DeleteWorkflowAsync(string workflowId, CancellationToken ct = default)
     {
-        var admin = await _session.GetWorkflowAdminAsync(ct);
+        EnsureWorkflowEnabled();
+        var admin = await GetWorkflowAdminDispatchAsync(ct);
 
-        return await _runner.RunAsync(() =>
-        {
-            var result = admin.DeleteWorkflow(workflowId);
-            return result == 0
-                ? ApiResult.Success("Workflow deleted via COM.")
-                : ApiResult.Failure(result, $"COM Delete failed with code {result}.");
-        }, ct);
+        var result = Convert.ToInt32(InvokeMethod(admin, "DeleteWorkflow", workflowId));
+        return result == 0
+            ? ApiResult.Success("Workflow deleted via COM.")
+            : ApiResult.Failure(result, $"COM Delete failed with code {result}.");
     }
 
     public async Task<WorkflowEditModel> AddStepAsync(WorkflowEditModel model, int position, CancellationToken ct = default)
     {
-        var admin = await _session.GetWorkflowAdminAsync(ct);
+        EnsureWorkflowEnabled();
+        var admin = await GetWorkflowAdminDispatchAsync(ct);
 
-        return await _runner.RunAsync(() =>
+        var nxWf = InvokeMethod(admin, "OpenWorkflow", model.WorkflowDefinition.WorkflowId);
+        try
         {
-            var nxWf = admin.OpenWorkflow(model.WorkflowDefinition.WorkflowId);
-            try
-            {
-                var nxStep = nxWf.AddStep(position);
-                var newStepId = nxStep.StepId;
-                ComLifecycle.Release(ref nxStep);
+            var nxStep = InvokeMethod(nxWf, "AddStep", position);
+            var newStepId = InvokeGetString(nxStep, "StepId");
+            ReleaseCom(ref nxStep);
 
-                // Re-read the full model after mutation
-                var updatedModel = MapWorkflowToEditModel(nxWf);
-                updatedModel.EStepId = newStepId;
-                return updatedModel;
-            }
-            finally
-            {
-                ComLifecycle.Release(ref nxWf);
-            }
-        }, ct);
+            var updatedModel = MapWorkflowToEditModel(nxWf);
+            updatedModel.EStepId = newStepId;
+            return updatedModel;
+        }
+        finally
+        {
+            ReleaseCom(ref nxWf);
+        }
     }
 
     public async Task<WorkflowEditModel> TagAsync(string workflowId, CancellationToken ct = default)
     {
-        var admin = await _session.GetWorkflowAdminAsync(ct);
+        EnsureWorkflowEnabled();
+        var admin = await GetWorkflowAdminDispatchAsync(ct);
 
-        return await _runner.RunAsync(() =>
+        var nxWf = InvokeMethod(admin, "TagWorkflow", workflowId);
+        try
         {
-            var nxWf = admin.TagWorkflow(workflowId);
-            try
-            {
-                return MapWorkflowToEditModel(nxWf);
-            }
-            finally
-            {
-                ComLifecycle.Release(ref nxWf);
-            }
-        }, ct);
+            return MapWorkflowToEditModel(nxWf);
+        }
+        finally
+        {
+            ReleaseCom(ref nxWf);
+        }
     }
 
     public async Task<ApiResult> UntagAsync(string workflowId, CancellationToken ct = default)
     {
-        var admin = await _session.GetWorkflowAdminAsync(ct);
+        EnsureWorkflowEnabled();
+        var admin = await GetWorkflowAdminDispatchAsync(ct);
 
-        return await _runner.RunAsync(() =>
-        {
-            var result = admin.UntagWorkflow(workflowId);
-            return result == 0
-                ? ApiResult.Success()
-                : ApiResult.Failure(result, $"COM Untag failed with code {result}.");
-        }, ct);
+        var result = Convert.ToInt32(InvokeMethod(admin, "UntagWorkflow", workflowId));
+        return result == 0
+            ? ApiResult.Success()
+            : ApiResult.Failure(result, $"COM Untag failed with code {result}.");
     }
 
     public async Task<List<WorkflowCommonTarget>> GetMetagroupsAsync(CancellationToken ct = default)
     {
-        var admin = await _session.GetWorkflowAdminAsync(ct);
+        EnsureWorkflowEnabled();
+        var admin = await GetWorkflowAdminDispatchAsync(ct);
 
-        return await _runner.RunAsync(() =>
+        var metagroups = new List<WorkflowCommonTarget>();
+        var count = InvokeGetInt(admin, "MetagroupCount");
+
+        for (var i = 0; i < count; i++)
         {
-            var metagroups = new List<WorkflowCommonTarget>();
-
-            for (var i = 0; i < admin.MetagroupCount; i++)
+            var mg = InvokeMethod(admin, "GetMetagroup", i);
+            metagroups.Add(new WorkflowCommonTarget
             {
-                var mg = admin.GetMetagroup(i);
-                try
-                {
-                    metagroups.Add(new WorkflowCommonTarget
-                    {
-                        Key = mg.Key,
-                        DisplayName = mg.DisplayName
-                    });
-                }
-                finally
-                {
-                    ComLifecycle.Release(ref mg);
-                }
-            }
+                Key = InvokeGetString(mg, "Key"),
+                DisplayName = InvokeGetString(mg, "DisplayName")
+            });
+            ReleaseCom(ref mg);
+        }
 
-            return metagroups;
-        }, ct);
+        return metagroups;
     }
 
     public Task<List<AdeptUserEntry>> GetUsersAsync(CancellationToken ct = default)
@@ -275,116 +252,107 @@ public class ComWorkflowApiClient : IWorkflowApiClient
             "User list retrieval is not supported via COM. Use the HTTP backend for name resolution.");
     }
 
-    private static WorkflowEditModel MapWorkflowToEditModel(INxWorkflow nxWf)
+    private static WorkflowEditModel MapWorkflowToEditModel(object nxWf)
     {
         var model = new WorkflowEditModel
         {
-            BEditable = nxWf.IsEditable,
-            AlreadyTaggedByName = nxWf.AlreadyTaggedByName,
+            BEditable = InvokeGetBool(nxWf, "IsEditable"),
+            AlreadyTaggedByName = InvokeGetString(nxWf, "AlreadyTaggedByName"),
             WorkflowDefinition = new WorkflowDefinition
             {
-                WorkflowId = nxWf.WorkflowId,
-                Name = nxWf.Name,
-                Memo = nxWf.Memo,
-                BDoEmailNotify = nxWf.DoEmailNotify,
-                BTimeoutOn = nxWf.TimeoutOn,
-                BRecurringTimeoutOn = nxWf.RecurringTimeoutOn,
-                Timeout = nxWf.Timeout,
-                RecurringTimeout = nxWf.RecurringTimeout,
-                BTimeoutIncludeSaturday = nxWf.TimeoutIncludeSaturday,
-                BTimeoutIncludeSunday = nxWf.TimeoutIncludeSunday
+                WorkflowId = InvokeGetString(nxWf, "WorkflowId"),
+                Name = InvokeGetString(nxWf, "Name"),
+                Memo = InvokeGetString(nxWf, "Memo"),
+                BDoEmailNotify = InvokeGetBool(nxWf, "DoEmailNotify"),
+                BTimeoutOn = InvokeGetBool(nxWf, "TimeoutOn"),
+                BRecurringTimeoutOn = InvokeGetBool(nxWf, "RecurringTimeoutOn"),
+                Timeout = InvokeGetString(nxWf, "Timeout"),
+                RecurringTimeout = InvokeGetString(nxWf, "RecurringTimeout"),
+                BTimeoutIncludeSaturday = InvokeGetBool(nxWf, "TimeoutIncludeSaturday"),
+                BTimeoutIncludeSunday = InvokeGetBool(nxWf, "TimeoutIncludeSunday")
             },
             WorkflowStepModels = new List<WorkflowStepModel>()
         };
 
-        for (var i = 0; i < nxWf.StepCount; i++)
+        var stepCount = InvokeGetInt(nxWf, "StepCount");
+        var workflowId = model.WorkflowDefinition.WorkflowId;
+        for (var i = 0; i < stepCount; i++)
         {
-            var nxStep = nxWf.GetStep(i);
-            try
+            var nxStep = InvokeMethod(nxWf, "GetStep", i);
+            var stepModel = new WorkflowStepModel
             {
-                var stepModel = new WorkflowStepModel
+                WorkflowStepDefinition = new WorkflowStepDefinition
                 {
-                    WorkflowStepDefinition = new WorkflowStepDefinition
-                    {
-                        WorkflowId = nxWf.WorkflowId,
-                        StepId = nxStep.StepId,
-                        Order = nxStep.Order,
-                        Name = nxStep.Name,
-                        BCanChangeWorkflow = nxStep.CanChangeWorkflow,
-                        BCanSignOut = nxStep.CanSignOut,
-                        BCanExpediteReject = nxStep.CanExpediteReject,
-                        BCanExpediteApprove = nxStep.CanExpediteApprove,
-                        BDoEmailNotify = nxStep.DoEmailNotify,
-                        BRequireComment = nxStep.RequireComment,
-                        BOnlyAllowAssignToApprovers = nxStep.OnlyAllowAssignToApprovers,
-                        RequiredApprovalsCount = nxStep.RequiredApprovalsCount,
-                        AutoAdvance = nxStep.AutoAdvance,
-                        BTimeoutOn = nxStep.TimeoutOn,
-                        BRecurringTimeoutOn = nxStep.RecurringTimeoutOn,
-                        Timeout = nxStep.Timeout,
-                        RecurringTimeout = nxStep.RecurringTimeout,
-                        BTimeoutIncludeSaturday = nxStep.TimeoutIncludeSaturday,
-                        BTimeoutIncludeSunday = nxStep.TimeoutIncludeSunday
-                    },
-                    InProcessCount = nxStep.InProcessCount,
-                    WorkflowTrusteeDefinitions = new List<WorkflowTrusteeDefinition>()
-                };
+                    WorkflowId = workflowId,
+                    StepId = InvokeGetString(nxStep, "StepId"),
+                    Order = InvokeGetInt(nxStep, "Order"),
+                    Name = InvokeGetString(nxStep, "Name"),
+                    BCanChangeWorkflow = InvokeGetBool(nxStep, "CanChangeWorkflow"),
+                    BCanSignOut = InvokeGetBool(nxStep, "CanSignOut"),
+                    BCanExpediteReject = InvokeGetBool(nxStep, "CanExpediteReject"),
+                    BCanExpediteApprove = InvokeGetBool(nxStep, "CanExpediteApprove"),
+                    BDoEmailNotify = InvokeGetBool(nxStep, "DoEmailNotify"),
+                    BRequireComment = InvokeGetBool(nxStep, "RequireComment"),
+                    BOnlyAllowAssignToApprovers = InvokeGetBool(nxStep, "OnlyAllowAssignToApprovers"),
+                    RequiredApprovalsCount = InvokeGetInt(nxStep, "RequiredApprovalsCount"),
+                    AutoAdvance = InvokeGetBool(nxStep, "AutoAdvance"),
+                    BTimeoutOn = InvokeGetBool(nxStep, "TimeoutOn"),
+                    BRecurringTimeoutOn = InvokeGetBool(nxStep, "RecurringTimeoutOn"),
+                    Timeout = InvokeGetString(nxStep, "Timeout"),
+                    RecurringTimeout = InvokeGetString(nxStep, "RecurringTimeout"),
+                    BTimeoutIncludeSaturday = InvokeGetBool(nxStep, "TimeoutIncludeSaturday"),
+                    BTimeoutIncludeSunday = InvokeGetBool(nxStep, "TimeoutIncludeSunday")
+                },
+                InProcessCount = InvokeGetInt(nxStep, "InProcessCount"),
+                WorkflowTrusteeDefinitions = new List<WorkflowTrusteeDefinition>()
+            };
 
-                for (var j = 0; j < nxStep.TrusteeCount; j++)
-                {
-                    var nxTrustee = nxStep.GetTrustee(j);
-                    try
-                    {
-                        stepModel.WorkflowTrusteeDefinitions.Add(new WorkflowTrusteeDefinition
-                        {
-                            WorkflowId = nxWf.WorkflowId,
-                            StepId = nxStep.StepId,
-                            TrusteeId = nxTrustee.TrusteeId,
-                            Type = MapTrusteeType(nxTrustee.Type)
-                        });
-                    }
-                    finally
-                    {
-                        ComLifecycle.Release(ref nxTrustee);
-                    }
-                }
-
-                model.WorkflowStepModels.Add(stepModel);
-            }
-            finally
+            var trusteeCount = InvokeGetInt(nxStep, "TrusteeCount");
+            for (var j = 0; j < trusteeCount; j++)
             {
-                ComLifecycle.Release(ref nxStep);
+                var nxTrustee = InvokeMethod(nxStep, "GetTrustee", j);
+                stepModel.WorkflowTrusteeDefinitions.Add(new WorkflowTrusteeDefinition
+                {
+                    WorkflowId = workflowId,
+                    StepId = stepModel.WorkflowStepDefinition.StepId,
+                    TrusteeId = InvokeGetString(nxTrustee, "TrusteeId"),
+                    Type = MapTrusteeType(InvokeGetString(nxTrustee, "Type"))
+                });
+                ReleaseCom(ref nxTrustee);
             }
+
+            model.WorkflowStepModels.Add(stepModel);
+            ReleaseCom(ref nxStep);
         }
 
         return model;
     }
 
-    private static void ApplyStepProperties(INxWorkflowStep nxStep, WorkflowStepModel stepModel)
+    private static void ApplyStepProperties(object nxStep, WorkflowStepModel stepModel)
     {
         var def = stepModel.WorkflowStepDefinition;
-        nxStep.Name = def.Name;
-        nxStep.CanChangeWorkflow = def.BCanChangeWorkflow;
-        nxStep.CanSignOut = def.BCanSignOut;
-        nxStep.CanExpediteReject = def.BCanExpediteReject;
-        nxStep.CanExpediteApprove = def.BCanExpediteApprove;
-        nxStep.DoEmailNotify = def.BDoEmailNotify;
-        nxStep.RequireComment = def.BRequireComment;
-        nxStep.OnlyAllowAssignToApprovers = def.BOnlyAllowAssignToApprovers;
-        nxStep.RequiredApprovalsCount = def.RequiredApprovalsCount;
-        nxStep.AutoAdvance = def.AutoAdvance;
-        nxStep.TimeoutOn = def.BTimeoutOn;
-        nxStep.RecurringTimeoutOn = def.BRecurringTimeoutOn;
-        nxStep.Timeout = def.Timeout ?? string.Empty;
-        nxStep.RecurringTimeout = def.RecurringTimeout ?? string.Empty;
-        nxStep.TimeoutIncludeSaturday = def.BTimeoutIncludeSaturday;
-        nxStep.TimeoutIncludeSunday = def.BTimeoutIncludeSunday;
+        InvokeSet(nxStep, "Name", def.Name);
+        InvokeSet(nxStep, "CanChangeWorkflow", def.BCanChangeWorkflow);
+        InvokeSet(nxStep, "CanSignOut", def.BCanSignOut);
+        InvokeSet(nxStep, "CanExpediteReject", def.BCanExpediteReject);
+        InvokeSet(nxStep, "CanExpediteApprove", def.BCanExpediteApprove);
+        InvokeSet(nxStep, "DoEmailNotify", def.BDoEmailNotify);
+        InvokeSet(nxStep, "RequireComment", def.BRequireComment);
+        InvokeSet(nxStep, "OnlyAllowAssignToApprovers", def.BOnlyAllowAssignToApprovers);
+        InvokeSet(nxStep, "RequiredApprovalsCount", def.RequiredApprovalsCount);
+        InvokeSet(nxStep, "AutoAdvance", def.AutoAdvance);
+        InvokeSet(nxStep, "TimeoutOn", def.BTimeoutOn);
+        InvokeSet(nxStep, "RecurringTimeoutOn", def.BRecurringTimeoutOn);
+        InvokeSet(nxStep, "Timeout", def.Timeout ?? string.Empty);
+        InvokeSet(nxStep, "RecurringTimeout", def.RecurringTimeout ?? string.Empty);
+        InvokeSet(nxStep, "TimeoutIncludeSaturday", def.BTimeoutIncludeSaturday);
+        InvokeSet(nxStep, "TimeoutIncludeSunday", def.BTimeoutIncludeSunday);
 
         // Update trustees
-        nxStep.ClearTrustees();
+        InvokeMethod(nxStep, "ClearTrustees");
         foreach (var trustee in stepModel.WorkflowTrusteeDefinitions)
         {
-            nxStep.AddTrustee(trustee.TrusteeId, MapTrusteeTypeToString(trustee.Type));
+            InvokeMethod(nxStep, "AddTrustee", trustee.TrusteeId, MapTrusteeTypeToString(trustee.Type));
         }
     }
 
@@ -412,5 +380,166 @@ public class ComWorkflowApiClient : IWorkflowApiClient
             WorkflowUserType.Approvers => "A",
             _ => "U"
         };
+    }
+
+    private async Task<object> GetWorkflowAdminDispatchAsync(CancellationToken ct)
+    {
+        var dispatch = await _legacySession.GetConnectedDispatchAsync(ct);
+        var attempted = new List<string>();
+
+        foreach (var (candidate, label) in EnumerateCandidates(dispatch))
+        {
+            var workflowAdmin = TryInvoke(candidate, "GetWorkflowAdmin");
+            if (workflowAdmin != null)
+                return workflowAdmin;
+
+            attempted.Add(label);
+        }
+
+        throw new NotSupportedException(
+            "Legacy COM session does not expose workflow administration (GetWorkflowAdmin). " +
+            $"Probed candidates: {string.Join(", ", attempted)}");
+    }
+
+    private static IEnumerable<(object candidate, string label)> EnumerateCandidates(object root)
+    {
+        var queue = new Queue<(object candidate, string label, int depth)>();
+        var seen = new HashSet<nint>();
+        queue.Enqueue((root, "root", 0));
+
+        while (queue.Count > 0)
+        {
+            var (candidate, label, depth) = queue.Dequeue();
+            var identity = GetIdentityKey(candidate);
+            if (identity != 0 && !seen.Add(identity))
+                continue;
+
+            yield return (candidate, label);
+
+            if (depth >= 3)
+                continue;
+
+            foreach (var methodName in new[] { "GetProject", "GetCore", "GetCoreApi", "GetLogin", "GetDomain", "GetApplication" })
+            {
+                var next = TryInvoke(candidate, methodName);
+                if (next != null)
+                    queue.Enqueue((next, $"{label}.{methodName}()", depth + 1));
+            }
+
+            foreach (var propertyName in new[] { "Project", "Core", "Login", "Domain", "Application" })
+            {
+                var next = TryGetProperty(candidate, propertyName);
+                if (next != null)
+                    queue.Enqueue((next, $"{label}.{propertyName}", depth + 1));
+            }
+        }
+    }
+
+    private static object? TryGetProperty(object target, string name)
+    {
+        try
+        {
+            return target.GetType().InvokeMember(
+                name,
+                BindingFlags.GetProperty,
+                null,
+                target,
+                null);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static nint GetIdentityKey(object value)
+    {
+        try
+        {
+            if (Marshal.IsComObject(value))
+            {
+                var ptr = Marshal.GetIUnknownForObject(value);
+                Marshal.Release(ptr);
+                return ptr;
+            }
+        }
+        catch
+        {
+        }
+
+        return value.GetHashCode();
+    }
+
+    private static object InvokeMethod(object target, string name, params object[] args)
+    {
+        var value = target.GetType().InvokeMember(
+            name,
+            BindingFlags.InvokeMethod,
+            null,
+            target,
+            args);
+
+        return value ?? throw new InvalidOperationException(
+            $"COM invocation '{name}' returned null on type {target.GetType().FullName}.");
+    }
+
+    private static object? TryInvoke(object target, string name, params object[] args)
+    {
+        try
+        {
+            return InvokeMethod(target, name, args);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string InvokeGetString(object target, string name)
+    {
+        var value = target.GetType().InvokeMember(
+            name,
+            BindingFlags.GetProperty,
+            null,
+            target,
+            null);
+        return value?.ToString() ?? string.Empty;
+    }
+
+    private static int InvokeGetInt(object target, string name)
+    {
+        var value = target.GetType().InvokeMember(
+            name,
+            BindingFlags.GetProperty,
+            null,
+            target,
+            null);
+        return value is int i ? i : Convert.ToInt32(value);
+    }
+
+    private static bool InvokeGetBool(object target, string name)
+    {
+        var value = target.GetType().InvokeMember(
+            name,
+            BindingFlags.GetProperty,
+            null,
+            target,
+            null);
+        return value is bool b ? b : Convert.ToBoolean(value);
+    }
+
+    private static void InvokeSet(object target, string name, object? value)
+    {
+        target.GetType().InvokeMember(
+            name,
+            BindingFlags.SetProperty,
+            null,
+            target,
+            new[] { value });
+    }
+
+    private static void ReleaseCom(ref object? value)
+    {
+        ComLifecycle.Release(ref value);
     }
 }

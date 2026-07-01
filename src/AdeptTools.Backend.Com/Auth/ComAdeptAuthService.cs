@@ -9,16 +9,14 @@ namespace AdeptTools.Backend.Com.Auth;
 /// </summary>
 public class ComAdeptAuthService : IAdeptAuthService
 {
-    private readonly ComOperationRunner _runner;
-    private readonly ComSessionManager _session;
+    private readonly ILegacyCoreApiSession _legacySession;
 
-    public ComAdeptAuthService(ComOperationRunner runner, ComSessionManager session)
+    public ComAdeptAuthService(ILegacyCoreApiSession legacySession)
     {
-        _runner = runner;
-        _session = session;
+        _legacySession = legacySession;
     }
 
-    public bool IsAuthenticated => _session.IsConnected;
+    public bool IsAuthenticated => _legacySession.IsConnected;
 
     /// <summary>
     /// COM sessions don't use tokens — returns a sentinel value when connected.
@@ -29,7 +27,7 @@ public class ComAdeptAuthService : IAdeptAuthService
     {
         try
         {
-            var result = await _session.ConnectAsync(serverUrl, userName, password, ct);
+            var result = await _legacySession.ConnectAsync(serverUrl, userName, password, ct);
 
             if (result != 0)
             {
@@ -38,16 +36,7 @@ public class ComAdeptAuthService : IAdeptAuthService
                     ErrorMessage: $"COM connection failed with error code {result}.");
             }
 
-            var project = _session.GetProject();
-            var info = await _runner.RunAsync(() => new
-            {
-                project.UserId,
-                project.UserName,
-                project.DisplayName,
-                project.EmailAddress,
-                project.AppVersion,
-                project.WorkAreaId
-            }, ct);
+            var info = await _legacySession.GetSessionInfoAsync(ct);
 
             return new AuthResult(
                 Success: true,
@@ -81,7 +70,7 @@ public class ComAdeptAuthService : IAdeptAuthService
 
     public async Task LogoutAsync(CancellationToken ct = default)
     {
-        await _session.DisconnectAsync(ct);
+        await _legacySession.DisconnectAsync(ct);
     }
 
     public Task<AuthResult> RefreshAsync(CancellationToken ct = default)

@@ -1,4 +1,5 @@
 using System.Windows;
+using AdeptTools.Backend.Com.Api;
 using AdeptTools.Backend.Com.Auth;
 using AdeptTools.Backend.Com.Infrastructure;
 using AdeptTools.Backend.Http.Auth;
@@ -76,9 +77,13 @@ public partial class App : Application
         services.AddSingleton<ComProfileService>();
 
         // COM backend services
+        services.AddSingleton<LegacyComFeatureFlags>();
         services.AddSingleton<ComOperationRunner>();
         services.AddSingleton<ComSessionManager>();
+        services.AddSingleton<ILegacyCoreApiSession, LegacyCoreApiSession>();
         services.AddSingleton<ComAdeptAuthService>();
+        services.AddSingleton<ComWorkflowApiClient>();
+        services.AddSingleton<ComImportApiClient>();
 
         // Auth service factory — returns mock, HTTP, or COM based on runtime state
         services.AddSingleton<MockAdeptAuthService>();
@@ -109,7 +114,9 @@ public partial class App : Application
         {
             return () => sp.GetRequiredService<MockModeState>().IsMock
                 ? sp.GetRequiredService<MockWorkflowApiClient>()
-                : sp.GetRequiredService<HttpWorkflowApiClient>();
+                : sp.GetRequiredService<ConnectViewModel>().SelectedBackend == BackendType.Com
+                    ? sp.GetRequiredService<ComWorkflowApiClient>()
+                    : sp.GetRequiredService<HttpWorkflowApiClient>();
         });
         services.AddTransient<WorkflowExcelReader>();
         services.AddTransient<WorkflowXmlReader>();
@@ -141,7 +148,9 @@ public partial class App : Application
         {
             return () => sp.GetRequiredService<MockModeState>().IsMock
                 ? sp.GetRequiredService<MockImportApiClient>()
-                : sp.GetRequiredService<HttpImportApiClient>();
+                : sp.GetRequiredService<ConnectViewModel>().SelectedBackend == BackendType.Com
+                    ? sp.GetRequiredService<ComImportApiClient>()
+                    : sp.GetRequiredService<HttpImportApiClient>();
         });
         services.AddTransient<ImportExcelReader>();
         services.AddTransient<ImportXmlConfigReader>();
