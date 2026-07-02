@@ -44,12 +44,6 @@ public class AccountLoginRequest
     [JsonPropertyName("redirect_uri")]
     public string? RedirectUri { get; set; }
 
-    [JsonPropertyName("windowsDomain")]
-    public string WindowsDomain { get; set; } = "";
-
-    [JsonPropertyName("windowsLogin")]
-    public string WindowsLogin { get; set; } = "";
-
     [JsonPropertyName("clientSecret")]
     public string ClientSecret { get; set; } = "";
 

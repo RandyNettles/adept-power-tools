@@ -3,6 +3,7 @@ using AdeptTools.Backend.Com.Auth;
 using AdeptTools.Backend.Com.Infrastructure;
 using AdeptTools.Backend.Http.Api;
 using AdeptTools.Backend.Http.Auth;
+using AdeptTools.Backend.Http.Handlers;
 using AdeptTools.Core.Api;
 using AdeptTools.Core.Auth;
 using AdeptTools.Core.Models;
@@ -37,27 +38,37 @@ public static class ServiceRegistration
             if (string.IsNullOrWhiteSpace(serverUrl))
                 throw new InvalidOperationException("--server is required when not using --mock mode.");
 
-            var baseUri = new Uri(serverUrl);
+            var normalizedServerUrl = serverUrl.TrimEnd('/') + "/";
+            var baseUri = new Uri(normalizedServerUrl, UriKind.Absolute);
 
-            services.AddHttpClient<IAdeptAuthService, HttpAdeptAuthService>(client =>
+            services.AddHttpClient("AdeptAuth", client =>
             {
                 client.BaseAddress = baseUri;
             });
+
+            services.AddSingleton<IAdeptAuthService>(sp =>
+            {
+                var authHttpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient("AdeptAuth");
+                return new HttpAdeptAuthService(authHttpClient);
+            });
+
+            services.AddTransient<BearerTokenHandler>(sp =>
+                new BearerTokenHandler(() => sp.GetRequiredService<IAdeptAuthService>().AccessToken));
 
             services.AddHttpClient<IAdeptApiClient, HttpAdeptApiClient>(client =>
             {
                 client.BaseAddress = baseUri;
-            });
+            }).AddHttpMessageHandler<BearerTokenHandler>();
 
             services.AddHttpClient<IWorkflowApiClient, HttpWorkflowApiClient>(client =>
             {
                 client.BaseAddress = baseUri;
-            });
+            }).AddHttpMessageHandler<BearerTokenHandler>();
 
             services.AddHttpClient<IImportApiClient, HttpImportApiClient>(client =>
             {
                 client.BaseAddress = baseUri;
-            });
+            }).AddHttpMessageHandler<BearerTokenHandler>();
         }
         else if (backend == BackendType.Com)
         {

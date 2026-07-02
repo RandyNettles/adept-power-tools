@@ -123,16 +123,29 @@ public static class AuthCommands
                 return;
             }
 
-            // Get additional info
-            var userInfo = await apiClient.GetUserInfoAsync();
+            // Get additional info (best-effort). Some servers can authenticate successfully
+            // while a follow-up user-info endpoint returns non-JSON content.
+            UserInfo? userInfo = null;
+            string? userInfoWarning = null;
+            try
+            {
+                userInfo = await apiClient.GetUserInfoAsync();
+            }
+            catch (Exception ex)
+            {
+                userInfoWarning = ex.Message;
+            }
 
-            Console.WriteLine($"  Version:    {userInfo.AppVersion ?? authResult.AppVersion ?? "unknown"}");
+            Console.WriteLine($"  Version:    {userInfo?.AppVersion ?? authResult.AppVersion ?? "unknown"}");
             Console.WriteLine($"  User:       {authResult.UserName} ({authResult.DisplayName})");
 
             if (settings.MockMode)
                 Console.WriteLine($"  Status:     \u001b[32m✓ Connected (mock)\u001b[0m");
             else
                 Console.WriteLine($"  Status:     \u001b[32m✓ Connected\u001b[0m");
+
+            if (!string.IsNullOrWhiteSpace(userInfoWarning))
+                Console.WriteLine($"  Warning:    Auth succeeded, but user info could not be read: {userInfoWarning}");
 
             Console.WriteLine();
             context.ExitCode = 0;

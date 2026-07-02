@@ -1,8 +1,7 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
-using System.Net;
-using System.Linq;
 using AdeptTools.Core.Models;
 using AdeptTools.Workflow.Api;
 using AdeptTools.Workflow.Input;
@@ -32,19 +31,6 @@ public class HttpWorkflowApiClient : IWorkflowApiClient
     {
         var endpoint = "api/admin/workflow/workflows";
         var response = await _httpClient.GetAsync(endpoint, ct);
-        if (response.StatusCode == HttpStatusCode.NotFound)
-        {
-            var (legacy, legacyFailure) = await TryGetLegacyWorkflowPacketAsync(ct);
-            if (legacy is not null)
-                return legacy;
-
-            var resolved = response.RequestMessage?.RequestUri?.ToString() ?? endpoint;
-            throw new HttpRequestException(
-                $"Workflow API request failed at '{resolved}' with HTTP 404 (Not Found). " +
-                "Legacy fallback routes were also unsuccessful. " +
-                (string.IsNullOrWhiteSpace(legacyFailure) ? string.Empty : $"Details: {legacyFailure}"));
-        }
-
         await EnsureSuccessOrThrowAsync(response, endpoint, ct);
         return await response.Content.ReadFromJsonAsync<WorkflowAdminPacket>(JsonOptions, ct) ?? new WorkflowAdminPacket();
     }
@@ -151,75 +137,5 @@ public class HttpWorkflowApiClient : IWorkflowApiClient
 
         throw new HttpRequestException(
             $"Workflow API request failed at '{resolved}' with {statusText}.{hint}{bodySnippet}");
-    }
-
-    private async Task<(WorkflowAdminPacket? Packet, string? Failure)> TryGetLegacyWorkflowPacketAsync(CancellationToken ct)
-    {
-        // Legacy server route family (Adept 11): api/Reports/GetWorkflowItems
-        // Accept empty filter arrays to request full results visible to current user.
-        var endpoint = "api/Reports/GetWorkflowItems";
-        var requestBody = new
-        {
-            S_WFID = Array.Empty<string>(),
-            S_STEPID = Array.Empty<string>(),
-            S_USERID = Array.Empty<string>(),
-            S_DEPCODE = Array.Empty<string>(),
-            S_LIBID = Array.Empty<string>(),
-            S_LONGNAME = Array.Empty<string>()
-        };
-
-        var response = await _httpClient.PostAsJsonAsync(endpoint, requestBody, JsonOptions, ct);
-        if (!response.IsSuccessStatusCode)
-        {
-            var body = await response.Content.ReadAsStringAsync(ct);
-            var bodySnippet = string.IsNullOrWhiteSpace(body)
-                ? string.Empty
-                : $" Body: {body[..Math.Min(220, body.Length)]}";
-
-            return (null,
-                $"POST {endpoint} => HTTP {(int)response.StatusCode} ({response.ReasonPhrase ?? "Unknown"}).{bodySnippet}");
-        }
-
-        var items = await response.Content.ReadFromJsonAsync<List<LegacyWorkflowReportItem>>(JsonOptions, ct)
-                    ?? new List<LegacyWorkflowReportItem>();
-
-        var grouped = items
-            .Where(i => !string.IsNullOrWhiteSpace(i.WorkflowId) || !string.IsNullOrWhiteSpace(i.WorkflowName))
-            .GroupBy(i => new
-            {
-                Id = string.IsNullOrWhiteSpace(i.WorkflowId) ? i.WorkflowName! : i.WorkflowId!,
-                Name = string.IsNullOrWhiteSpace(i.WorkflowName) ? i.WorkflowId! : i.WorkflowName!
-            })
-            .Select(g => new WorkflowAdminItem
-            {
-                WorkflowId = g.Key.Id,
-                WorkflowName = g.Key.Name,
-                Active = true,
-                StepCount = g.Select(x => x.StepId).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct(StringComparer.OrdinalIgnoreCase).Count(),
-                InProcessCount = g.Count(),
-                Edit = true,
-                Share = true,
-                Delete = true,
-                LockedByDisplayName = null
-            })
-            .OrderBy(w => w.WorkflowName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
-        var packet = new WorkflowAdminPacket
-        {
-            CurrentUserId = string.Empty,
-            WfNameLen = Math.Max(64, grouped.Count == 0 ? 0 : grouped.Max(w => w.WorkflowName?.Length ?? 0)),
-            WfStepNameLen = 64,
-            Workflows = grouped
-        };
-
-        return (packet, null);
-    }
-
-    private sealed class LegacyWorkflowReportItem
-    {
-        public string? WorkflowId { get; set; }
-        public string? WorkflowName { get; set; }
-        public string? StepId { get; set; }
     }
 }

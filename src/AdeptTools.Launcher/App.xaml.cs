@@ -4,6 +4,7 @@ using AdeptTools.Backend.Com.Auth;
 using AdeptTools.Backend.Com.Infrastructure;
 using AdeptTools.Backend.Http.Auth;
 using AdeptTools.Backend.Http.Api;
+using AdeptTools.Backend.Http.Handlers;
 using AdeptTools.Core.Auth;
 using AdeptTools.Core.Configuration;
 using AdeptTools.Core.Models;
@@ -112,14 +113,12 @@ public partial class App : Application
 
         // Workflow services — returns mock or HTTP based on runtime toggle
         services.AddSingleton<MockWorkflowApiClient>();
+        services.AddTransient<BearerTokenHandler>(sp => new BearerTokenHandler(() => httpClientConfig.AccessToken));
         services.AddHttpClient<HttpWorkflowApiClient>(client =>
         {
             if (!string.IsNullOrEmpty(httpClientConfig.BaseUrl))
                 client.BaseAddress = new Uri(httpClientConfig.BaseUrl);
-            if (!string.IsNullOrEmpty(httpClientConfig.AccessToken))
-                client.DefaultRequestHeaders.Authorization =
-                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", httpClientConfig.AccessToken);
-        });
+        }).AddHttpMessageHandler<BearerTokenHandler>();
         services.AddSingleton<Func<IWorkflowApiClient>>(sp =>
         {
             return () => sp.GetRequiredService<MockModeState>().IsMock
@@ -150,10 +149,7 @@ public partial class App : Application
         {
             if (!string.IsNullOrEmpty(httpClientConfig.BaseUrl))
                 client.BaseAddress = new Uri(httpClientConfig.BaseUrl);
-            if (!string.IsNullOrEmpty(httpClientConfig.AccessToken))
-                client.DefaultRequestHeaders.Authorization =
-                    new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", httpClientConfig.AccessToken);
-        });
+        }).AddHttpMessageHandler<BearerTokenHandler>();
         services.AddSingleton<Func<IImportApiClient>>(sp =>
         {
             return () => sp.GetRequiredService<MockModeState>().IsMock

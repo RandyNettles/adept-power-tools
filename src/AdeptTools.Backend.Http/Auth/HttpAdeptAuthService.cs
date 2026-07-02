@@ -239,8 +239,11 @@ public class HttpAdeptAuthService : IAdeptAuthService
             }
             else
             {
-                // Neither OAuth nor Cognito configured — fall back to Windows domain auth.
-                return await LoginWithWindowsSsoAsync(userName, ct);
+                // Neither OAuth nor Cognito configured — HTTP mode requires Adept 12.0 authentication.
+                return new AuthResult(false,
+                    "No SSO provider is configured on this server. " +
+                    "HTTP mode requires OAuth or Cognito to be configured in Adept 12.0. " +
+                    "Contact your administrator to configure an identity provider.");
             }
         }
         else
@@ -408,51 +411,6 @@ public class HttpAdeptAuthService : IAdeptAuthService
         return null;
     }
 
-    private async Task<AuthResult> LoginWithWindowsSsoAsync(string userName, CancellationToken ct)
-    {
-        try
-        {
-            var loginRequest = new AccountLoginRequest
-            {
-                UserName = userName,
-                Password = "",
-                WindowsDomain = Environment.UserDomainName,
-                WindowsLogin = Environment.UserName,
-                ForceLogin = false,
-                ClientId = "Adept"
-            };
-
-            var (authResponse, rawBody) = await PostLoginAsync(loginRequest, ct);
-            if (authResponse is null)
-                return new AuthResult(false, "Empty response from server");
-
-            if (authResponse.StatusCode != 0 && IsAlreadyLoggedInError(authResponse))
-            {
-                loginRequest.ForceLogin = true;
-                (authResponse, rawBody) = await PostLoginAsync(loginRequest, ct);
-                if (authResponse is null)
-                    return new AuthResult(false, "Empty response from server");
-            }
-
-            if (authResponse.StatusCode == 230)
-            {
-                _pending230Response = authResponse;
-                List<UserChoice>? ch;
-                try { ch = ParseUserChoices(rawBody!); } catch { ch = null; }
-                return new AuthResult(false, RequiresUserSelection: true, UserChoices: ch);
-            }
-
-            if (authResponse.StatusCode != 0)
-                return new AuthResult(false, GetFriendlyAuthErrorMessage(authResponse, "Windows SSO login failed"));
-
-            return BuildAuthResult(authResponse);
-        }
-        catch (HttpRequestException ex)
-        {
-            return new AuthResult(false, $"Windows SSO login failed: {ex.Message}");
-        }
-    }
-
     private async Task<AuthResult> LoginWithPasswordAsync(string userName, string password, CancellationToken ct)
     {
         try
@@ -535,6 +493,22 @@ public class HttpAdeptAuthService : IAdeptAuthService
                 ErrorMessage = $"Unexpected server response (HTTP {(int)response.StatusCode}): {ex.Message} — Body: {body[..Math.Min(300, body.Length)]}.{hint}"
             };
         }
+
+        // Safety guard: if the HTTP response was non-success but JSON deserialization produced
+        // StatusCode=0 with no access_token (e.g. a generic 404 JSON error body such as
+        // {"Message":"No HTTP resource was found..."}), surface a clear HTTP-level error.
+        if (!response.IsSuccessStatusCode && auth is not null && auth.StatusCode == 0 && string.IsNullOrEmpty(auth.AccessToken))
+        {
+            var httpHint = response.StatusCode == HttpStatusCode.NotFound
+                ? " Verify the server URL includes the correct web app path (e.g. '/Synergis.WebApi/')."
+                : string.Empty;
+            auth = new AuthenticateResponse
+            {
+                StatusCode = -1,
+                ErrorMessage = $"Login endpoint returned HTTP {(int)response.StatusCode} ({response.ReasonPhrase ?? "Unknown"}) from '{loginUrl}'.{httpHint}"
+            };
+        }
+
         return (auth, body);
     }
 

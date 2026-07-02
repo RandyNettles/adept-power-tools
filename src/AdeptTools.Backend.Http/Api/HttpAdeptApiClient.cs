@@ -17,7 +17,7 @@ public class HttpAdeptApiClient : IAdeptApiClient
 
     public async Task<UserInfo> GetUserInfoAsync(CancellationToken ct = default)
     {
-        var response = await _httpClient.GetAsync("/api/account/UserInfo", ct);
+        var response = await _httpClient.GetAsync("api/account/UserInfo", ct);
         response.EnsureSuccessStatusCode();
 
         var userInfo = await response.Content.ReadFromJsonAsync<UserInfo>(JsonOptions, ct);
@@ -28,7 +28,7 @@ public class HttpAdeptApiClient : IAdeptApiClient
     {
         try
         {
-            var response = await _httpClient.GetAsync("/api/account/isLoggedIn", ct);
+            var response = await _httpClient.GetAsync("api/account/isLoggedIn", ct);
             if (!response.IsSuccessStatusCode) return false;
             var content = await response.Content.ReadAsStringAsync(ct);
             return bool.TryParse(content, out var result) && result;

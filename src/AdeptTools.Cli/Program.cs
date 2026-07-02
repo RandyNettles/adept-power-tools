@@ -125,6 +125,11 @@ var parser = new CommandLineBuilder(rootCommand)
                     loginPassword,
                     context.GetCancellationToken());
 
+                if (!authResult.Success && authResult.RequiresUserSelection)
+                {
+                    authResult = await PromptForUserSelectionAsync(authService, authResult, context.GetCancellationToken());
+                }
+
                 if (!authResult.Success)
                 {
                     var error = string.IsNullOrWhiteSpace(authResult.ErrorMessage)
@@ -133,11 +138,7 @@ var parser = new CommandLineBuilder(rootCommand)
 
                     Console.Error.WriteLine($"Error: unable to establish {backend} session. {error}");
 
-                    if (authResult.RequiresUserSelection)
-                    {
-                        Console.Error.WriteLine("Hint: run 'auth test' to choose the desired account, then rerun this command.");
-                    }
-                    else if (backend == BackendType.Com)
+                    if (backend == BackendType.Com)
                     {
                         Console.Error.WriteLine("Hint: verify Adept desktop is open and logged in, or set ADEPTTOOLS_PASSWORD for direct login.");
                     }
@@ -153,6 +154,33 @@ var parser = new CommandLineBuilder(rootCommand)
     .Build();
 
 return await parser.InvokeAsync(args);
+
+static async Task<AuthResult> PromptForUserSelectionAsync(
+    IAdeptAuthService authService,
+    AuthResult authResult,
+    CancellationToken ct)
+{
+    if (authResult.UserChoices is null || authResult.UserChoices.Count == 0)
+        return new AuthResult(false, "Multiple Adept accounts were returned, but no selectable users were provided.");
+
+    Console.WriteLine("  Select user:");
+    for (var i = 0; i < authResult.UserChoices.Count; i++)
+    {
+        var choice = authResult.UserChoices[i];
+        Console.WriteLine($"    {i + 1}. {choice.DisplayLabel}");
+    }
+
+    Console.Write("  Choice:     ");
+    var input = Console.ReadLine();
+    if (!int.TryParse(input, out var selectedIndex) ||
+        selectedIndex < 1 || selectedIndex > authResult.UserChoices.Count)
+    {
+        return new AuthResult(false, "Invalid selection.");
+    }
+
+    var selected = authResult.UserChoices[selectedIndex - 1];
+    return await authService.SelectUserAsync(selected.Id, selected.UserName, ct);
+}
 
 static bool IsAuthCommand(CommandResult commandResult)
 {
