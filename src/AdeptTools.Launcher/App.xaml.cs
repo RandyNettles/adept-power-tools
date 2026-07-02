@@ -5,6 +5,7 @@ using AdeptTools.Backend.Com.Infrastructure;
 using AdeptTools.Backend.Http.Auth;
 using AdeptTools.Backend.Http.Api;
 using AdeptTools.Core.Auth;
+using AdeptTools.Core.Configuration;
 using AdeptTools.Core.Models;
 using AdeptTools.Import.Api;
 using AdeptTools.Import.Readers;
@@ -72,6 +73,15 @@ public partial class App : Application
         services.AddSingleton(mockModeState);
         var httpClientConfig = new HttpClientConfig();
         services.AddSingleton(httpClientConfig);
+        services.AddSingleton(new AdeptToolSettings
+        {
+            Backend = BackendType.Com,
+            MockMode = mockModeState.IsMock,
+            ServerUrl = null,
+            UserName = null,
+            Verbose = false,
+            LogPath = null
+        });
         services.AddSingleton<ServerHistoryService>();
         services.AddSingleton<AuthSessionStore>();
         services.AddSingleton<ComProfileService>();

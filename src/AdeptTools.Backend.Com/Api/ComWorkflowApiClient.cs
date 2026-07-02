@@ -1,8 +1,10 @@
 using AdeptTools.Backend.Com.Infrastructure;
+using AdeptTools.Core.Configuration;
 using AdeptTools.Core.Models;
 using AdeptTools.Workflow.Api;
 using AdeptTools.Workflow.Input;
 using AdeptTools.Workflow.Models;
+using System.Collections;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
@@ -15,12 +17,20 @@ namespace AdeptTools.Backend.Com.Api;
 public class ComWorkflowApiClient : IWorkflowApiClient
 {
     private readonly ILegacyCoreApiSession _legacySession;
+    private readonly ComSessionManager? _sessionManager;
+    private readonly AdeptToolSettings? _settings;
     private readonly LegacyComFeatureFlags _flags;
 
-    public ComWorkflowApiClient(ILegacyCoreApiSession legacySession, LegacyComFeatureFlags flags)
+    public ComWorkflowApiClient(
+        ILegacyCoreApiSession legacySession,
+        LegacyComFeatureFlags flags,
+        ComSessionManager? sessionManager = null,
+        AdeptToolSettings? settings = null)
     {
         _legacySession = legacySession;
         _flags = flags;
+        _sessionManager = sessionManager;
+        _settings = settings;
     }
 
     private void EnsureWorkflowEnabled()
@@ -49,14 +59,32 @@ public class ComWorkflowApiClient : IWorkflowApiClient
     public async Task<WorkflowAdminPacket> GetWorkflowsAsync(CancellationToken ct = default)
     {
         EnsureWorkflowEnabled();
-        var admin = await GetWorkflowAdminDispatchAsync(ct);
         var info = await _legacySession.GetSessionInfoAsync(ct);
+
+        object? admin = null;
+        try
+        {
+            admin = await GetWorkflowAdminDispatchAsync(ct);
+        }
+        catch (NotSupportedException)
+        {
+            // Some legacy environments expose workflow definitions via
+            // Project.WorkflowDefManager.WorkflowDefList instead of GetWorkflowAdmin.
+            var fallback = await TryGetWorkflowsFromDefinitionManagerAsync(ct);
+            if (fallback is not null)
+            {
+                fallback.CurrentUserId = info.UserId;
+                return fallback;
+            }
+
+            throw;
+        }
 
         var packet = new WorkflowAdminPacket
         {
             CurrentUserId = info.UserId,
-            WfNameLen = InvokeGetInt(admin, "MaxWorkflowNameLength"),
-            WfStepNameLen = InvokeGetInt(admin, "MaxStepNameLength"),
+            WfNameLen = TryGetInt(admin, "MaxWorkflowNameLength") ?? 64,
+            WfStepNameLen = TryGetInt(admin, "MaxStepNameLength") ?? 64,
             Workflows = new List<WorkflowAdminItem>()
         };
 
@@ -80,6 +108,261 @@ public class ComWorkflowApiClient : IWorkflowApiClient
         }
 
         return packet;
+    }
+
+    private async Task<WorkflowAdminPacket?> TryGetWorkflowsFromDefinitionManagerAsync(CancellationToken ct)
+    {
+        var dispatch = await _legacySession.GetConnectedDispatchAsync(ct);
+
+        foreach (var (candidate, _) in EnumerateCandidates(dispatch))
+        {
+            var list = TryGetWorkflowDefinitionList(candidate);
+            if (list is null)
+                continue;
+
+            var packet = new WorkflowAdminPacket
+            {
+                WfNameLen = 64,
+                WfStepNameLen = 64,
+                Workflows = new List<WorkflowAdminItem>()
+            };
+
+            var count = TryInvokeIntByNames(list, "GetCount", "Count", "WorkflowCount", "GetWorkflowCount")
+                        ?? TryGetInt(list, "Count")
+                        ?? TryGetInt(list, "WorkflowCount")
+                        ?? 0;
+
+            var anyItems = false;
+
+            for (var i = 0; i < count; i++)
+            {
+                var wf = TryInvoke(list, "GetItem", i)
+                         ?? TryInvoke(list, "GetItem", i + 1);
+                if (wf is null)
+                    continue;
+
+                try
+                {
+                    anyItems = true;
+                    var name = TryGetString(wf, "Name") ?? string.Empty;
+                    var id = TryGetString(wf, "Id") ?? TryGetString(wf, "WorkflowId") ?? name;
+                    var stepCount = TryGetStepCountFromDefinition(wf) ?? 0;
+                    var isActive = TryGetBool(wf, "Active")
+                                   ?? TryGetBool(wf, "bActive")
+                                   ?? true;
+
+                    packet.Workflows.Add(new WorkflowAdminItem
+                    {
+                        WorkflowId = id,
+                        WorkflowName = name,
+                        Active = isActive,
+                        StepCount = stepCount,
+                        InProcessCount = 0,
+                        Edit = true,
+                        Share = true,
+                        Delete = true,
+                        LockedByDisplayName = null
+                    });
+
+                    if (!string.IsNullOrEmpty(name))
+                        packet.WfNameLen = Math.Max(packet.WfNameLen, name.Length);
+                }
+                finally
+                {
+                    ReleaseCom(ref wf);
+                }
+            }
+
+            // Some legacy COM lists are enumerable but do not expose GetCount/GetItem.
+            if (!anyItems)
+            {
+                foreach (var wf in EnumerateComItems(list))
+                {
+                    if (wf is null)
+                        continue;
+
+                    try
+                    {
+                        anyItems = true;
+                        var name = TryGetString(wf, "Name") ?? string.Empty;
+                        var id = TryGetString(wf, "Id") ?? TryGetString(wf, "WorkflowId") ?? name;
+                        var stepCount = TryGetStepCountFromDefinition(wf) ?? 0;
+                        var isActive = TryGetBool(wf, "Active")
+                                       ?? TryGetBool(wf, "bActive")
+                                       ?? true;
+
+                        packet.Workflows.Add(new WorkflowAdminItem
+                        {
+                            WorkflowId = id,
+                            WorkflowName = name,
+                            Active = isActive,
+                            StepCount = stepCount,
+                            InProcessCount = 0,
+                            Edit = true,
+                            Share = true,
+                            Delete = true,
+                            LockedByDisplayName = null
+                        });
+
+                        if (!string.IsNullOrEmpty(name))
+                            packet.WfNameLen = Math.Max(packet.WfNameLen, name.Length);
+                    }
+                    finally
+                    {
+                        var tmp = wf;
+                        ReleaseCom(ref tmp);
+                    }
+                }
+            }
+
+            return packet;
+        }
+
+        return null;
+    }
+
+    private static object? TryGetWorkflowDefinitionList(object candidate)
+    {
+        // Candidate itself may already be the list.
+        if (LooksLikeWorkflowDefinitionList(candidate))
+            return candidate;
+
+        var project = TryGetProperty(candidate, "Project")
+                      ?? TryInvoke(candidate, "GetProject")
+                      ?? TryInvoke(candidate, "Project");
+
+        var manager = TryGetProperty(candidate, "WorkflowDefManager")
+                      ?? TryGetProperty(candidate, "WorkFlowDefManager")
+                      ?? TryInvoke(candidate, "GetWorkflowDefManager")
+                      ?? TryInvoke(candidate, "GetWorkFlowDefManager")
+                      ?? TryInvoke(candidate, "WorkflowDefManager")
+                      ?? TryInvoke(candidate, "WorkFlowDefManager")
+                      ?? (project is null ? null :
+                          TryGetProperty(project, "WorkflowDefManager")
+                          ?? TryGetProperty(project, "WorkFlowDefManager")
+                          ?? TryInvoke(project, "GetWorkflowDefManager")
+                          ?? TryInvoke(project, "GetWorkFlowDefManager")
+                          ?? TryInvoke(project, "WorkflowDefManager")
+                          ?? TryInvoke(project, "WorkFlowDefManager"));
+
+        var list = TryGetProperty(candidate, "WorkflowDefList")
+                   ?? TryGetProperty(candidate, "WorkFlowDefList")
+                   ?? TryInvoke(candidate, "GetWorkflowDefList")
+                   ?? TryInvoke(candidate, "GetWorkFlowDefList")
+                   ?? TryInvoke(candidate, "WorkflowDefList")
+                   ?? TryInvoke(candidate, "WorkFlowDefList")
+                   ?? (manager is null ? null :
+                       TryGetProperty(manager, "WorkflowDefList")
+                       ?? TryGetProperty(manager, "WorkFlowDefList")
+                       ?? TryInvoke(manager, "GetWorkflowDefList")
+                       ?? TryInvoke(manager, "GetWorkFlowDefList")
+                       ?? TryInvoke(manager, "WorkflowDefList")
+                       ?? TryInvoke(manager, "WorkFlowDefList"));
+
+        return list is not null && LooksLikeWorkflowDefinitionList(list)
+            ? list
+            : null;
+    }
+
+    private static bool LooksLikeWorkflowDefinitionList(object candidate)
+    {
+        var hasCount = TryInvokeIntByNames(candidate, "GetCount")
+                       ?? TryGetInt(candidate, "Count")
+                       ?? TryGetInt(candidate, "WorkflowCount");
+        if (!hasCount.HasValue)
+        {
+            // Still treat as a likely list if it is enumerable and yields workflow-like items.
+            var firstEnumerableItem = EnumerateComItems(candidate).FirstOrDefault();
+            if (firstEnumerableItem is null)
+                return false;
+
+            try
+            {
+                return TryGetString(firstEnumerableItem, "Name") is not null
+                       && (TryGetString(firstEnumerableItem, "Id") is not null
+                           || TryGetString(firstEnumerableItem, "WorkflowId") is not null);
+            }
+            finally
+            {
+                var tmp = firstEnumerableItem;
+                ReleaseCom(ref tmp);
+            }
+        }
+
+        if (hasCount.Value == 0)
+            return true;
+
+        var first = TryInvoke(candidate, "GetItem", 0)
+                    ?? TryInvoke(candidate, "FindName", string.Empty)
+                    ?? EnumerateComItems(candidate).FirstOrDefault();
+        if (first is null)
+            return false;
+
+        try
+        {
+            var looksLikeWorkflow = TryGetString(first, "Name") is not null
+                                    && (TryGetString(first, "Id") is not null
+                                        || TryGetString(first, "WorkflowId") is not null);
+            return looksLikeWorkflow;
+        }
+        finally
+        {
+            ReleaseCom(ref first);
+        }
+    }
+
+    private static IEnumerable<object?> EnumerateComItems(object source)
+    {
+        IEnumerable? enumerable = source as IEnumerable;
+
+        if (enumerable is null)
+        {
+            var fromEnumProperty = TryGetProperty(source, "_NewEnum");
+            enumerable = fromEnumProperty as IEnumerable;
+        }
+
+        if (enumerable is null)
+            yield break;
+
+        foreach (var item in enumerable)
+            yield return item;
+    }
+
+    private static int? TryInvokeIntByNames(object target, params string[] names)
+    {
+        foreach (var name in names)
+        {
+            var value = TryInvoke(target, name);
+            if (value is null)
+                continue;
+
+            try
+            {
+                return Convert.ToInt32(value);
+            }
+            catch
+            {
+                // Continue probing.
+            }
+        }
+
+        return null;
+    }
+
+    private static int? TryGetStepCountFromDefinition(object workflowDef)
+    {
+        var direct = TryGetInt(workflowDef, "StepCount")
+                     ?? TryGetInt(workflowDef, "WorkflowStepCount");
+        if (direct.HasValue)
+            return direct;
+
+        var stepList = TryGetProperty(workflowDef, "WorkflowStepDefList")
+                       ?? TryInvoke(workflowDef, "GetWorkflowStepDefList");
+        if (stepList is null)
+            return null;
+
+        return TryInvokeIntByNames(stepList, "GetCount")
+               ?? TryGetInt(stepList, "Count");
     }
 
     public Task<WorkflowAdminPacket> GetWorkflowsBasicAsync(CancellationToken ct = default)
@@ -389,16 +672,93 @@ public class ComWorkflowApiClient : IWorkflowApiClient
 
         foreach (var (candidate, label) in EnumerateCandidates(dispatch))
         {
-            var workflowAdmin = TryInvoke(candidate, "GetWorkflowAdmin");
-            if (workflowAdmin != null)
-                return workflowAdmin;
+            if (LooksLikeWorkflowAdmin(candidate))
+                return candidate;
+
+            foreach (var methodName in new[]
+                     {
+                         "GetWorkflowAdmin",
+                         "GetWorkFlowAdmin",
+                         "GetWfAdmin",
+                         "GetWFAdmin",
+                         "GetWorkflowAdministrator",
+                         "GetWorkflowManager"
+                     })
+            {
+                var workflowAdmin = TryInvoke(candidate, methodName);
+                if (workflowAdmin != null)
+                    return workflowAdmin;
+            }
+
+            foreach (var propertyName in new[]
+                     {
+                         "WorkflowAdmin",
+                         "WorkFlowAdmin",
+                         "WfAdmin",
+                         "WFAdmin",
+                         "WorkflowAdministrator",
+                         "WorkflowManager"
+                     })
+            {
+                var workflowAdmin = TryGetProperty(candidate, propertyName);
+                if (workflowAdmin != null)
+                    return workflowAdmin;
+            }
 
             attempted.Add(label);
         }
 
+        var sdkFallback = await TryGetWorkflowAdminFromSdkAsync(ct);
+        if (sdkFallback is not null)
+            return sdkFallback;
+
         throw new NotSupportedException(
-            "Legacy COM session does not expose workflow administration (GetWorkflowAdmin). " +
+            "Legacy COM session does not expose workflow administration (GetWorkflowAdmin/WorkflowAdmin). " +
             $"Probed candidates: {string.Join(", ", attempted)}");
+    }
+
+    private async Task<object?> TryGetWorkflowAdminFromSdkAsync(CancellationToken ct)
+    {
+        if (_sessionManager is null || _settings is null || string.IsNullOrWhiteSpace(_settings.ServerUrl))
+            return null;
+
+        try
+        {
+            if (!_sessionManager.IsConnected)
+            {
+                var userName = string.IsNullOrWhiteSpace(_settings.UserName) ? "ADM" : _settings.UserName;
+                var password = Environment.GetEnvironmentVariable("ADEPTTOOLS_PASSWORD") ?? string.Empty;
+                var connectResult = await _sessionManager.ConnectAsync(_settings.ServerUrl!, userName, password, ct);
+                if (connectResult != 0)
+                    return null;
+            }
+
+            return await _sessionManager.GetWorkflowAdminAsync(ct);
+        }
+        catch
+        {
+            // SDK fallback is optional. Legacy COM-only environments should continue
+            // and report the legacy probing result instead of hard failing here.
+            return null;
+        }
+    }
+
+    private static bool LooksLikeWorkflowAdmin(object candidate)
+    {
+        var score = 0;
+        if (HasProperty(candidate, "WorkflowCount")) score++;
+        if (HasProperty(candidate, "MaxWorkflowNameLength")) score++;
+        if (HasProperty(candidate, "MaxStepNameLength")) score++;
+        if (HasProperty(candidate, "MaxWorkflowSteps")) score++;
+        if (HasProperty(candidate, "MaxWorkflows")) score++;
+
+        // Require at least two distinctive members to avoid false positives.
+        return score >= 2;
+    }
+
+    private static bool HasProperty(object target, string name)
+    {
+        return TryGetProperty(target, name) is not null;
     }
 
     private static IEnumerable<(object candidate, string label)> EnumerateCandidates(object root)
@@ -416,17 +776,52 @@ public class ComWorkflowApiClient : IWorkflowApiClient
 
             yield return (candidate, label);
 
-            if (depth >= 3)
+            if (depth >= 5)
                 continue;
 
-            foreach (var methodName in new[] { "GetProject", "GetCore", "GetCoreApi", "GetLogin", "GetDomain", "GetApplication" })
+            foreach (var methodName in new[]
+                     {
+                         "GetProject",
+                         "Project",
+                         "GetCore",
+                         "Core",
+                         "GetCoreApi",
+                         "GetLogin",
+                         "Login",
+                         "GetDomain",
+                         "Domain",
+                         "GetApplication",
+                         "Application",
+                         "GetDatabase",
+                         "Database",
+                         "GetWorkflowDefManager",
+                         "GetWorkFlowDefManager",
+                         "WorkflowDefManager",
+                         "WorkFlowDefManager",
+                         "GetWorkflowDefList",
+                         "GetWorkFlowDefList",
+                         "WorkflowDefList",
+                         "WorkFlowDefList"
+                     })
             {
                 var next = TryInvoke(candidate, methodName);
                 if (next != null)
                     queue.Enqueue((next, $"{label}.{methodName}()", depth + 1));
             }
 
-            foreach (var propertyName in new[] { "Project", "Core", "Login", "Domain", "Application" })
+            foreach (var propertyName in new[]
+                     {
+                         "Project",
+                         "Core",
+                         "Login",
+                         "Domain",
+                         "Application",
+                         "Database",
+                         "WorkflowDefManager",
+                         "WorkFlowDefManager",
+                         "WorkflowDefList"
+                         ,"WorkFlowDefList"
+                     })
             {
                 var next = TryGetProperty(candidate, propertyName);
                 if (next != null)
@@ -441,7 +836,7 @@ public class ComWorkflowApiClient : IWorkflowApiClient
         {
             return target.GetType().InvokeMember(
                 name,
-                BindingFlags.GetProperty,
+                BindingFlags.GetProperty | BindingFlags.IgnoreCase,
                 null,
                 target,
                 null);
@@ -474,7 +869,7 @@ public class ComWorkflowApiClient : IWorkflowApiClient
     {
         var value = target.GetType().InvokeMember(
             name,
-            BindingFlags.InvokeMethod,
+            BindingFlags.InvokeMethod | BindingFlags.IgnoreCase,
             null,
             target,
             args);
@@ -515,6 +910,71 @@ public class ComWorkflowApiClient : IWorkflowApiClient
             target,
             null);
         return value is int i ? i : Convert.ToInt32(value);
+    }
+
+    private static int? TryGetInt(object target, string name)
+    {
+        try
+        {
+            var value = target.GetType().InvokeMember(
+                name,
+                BindingFlags.GetProperty | BindingFlags.IgnoreCase,
+                null,
+                target,
+                null);
+            if (value is null)
+                return null;
+
+            return value is int i ? i : Convert.ToInt32(value);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string? TryGetString(object target, string name)
+    {
+        try
+        {
+            var value = target.GetType().InvokeMember(
+                name,
+                BindingFlags.GetProperty | BindingFlags.IgnoreCase,
+                null,
+                target,
+                null);
+            return value?.ToString();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static bool? TryGetBool(object target, string name)
+    {
+        try
+        {
+            var value = target.GetType().InvokeMember(
+                name,
+                BindingFlags.GetProperty | BindingFlags.IgnoreCase,
+                null,
+                target,
+                null);
+
+            return value switch
+            {
+                null => null,
+                bool b => b,
+                int i => i != 0,
+                _ when bool.TryParse(value.ToString(), out var parsed) => parsed,
+                _ => null
+            };
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private static bool InvokeGetBool(object target, string name)

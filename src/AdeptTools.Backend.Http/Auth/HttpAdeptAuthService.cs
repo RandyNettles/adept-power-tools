@@ -499,12 +499,24 @@ public class HttpAdeptAuthService : IAdeptAuthService
 
     private async Task<(AuthenticateResponse? Response, string? RawBody)> PostLoginAsync(AccountLoginRequest request, CancellationToken ct)
     {
-        var response = await _httpClient.PostAsJsonAsync($"{_serverBaseUrl}api/Account/login", request, JsonOptions, ct);
+        var loginUrl = $"{_serverBaseUrl}api/Account/login";
+        var response = await _httpClient.PostAsJsonAsync(loginUrl, request, JsonOptions, ct);
 
         // Read body regardless of status code — the server returns JSON even on 400
         var body = await response.Content.ReadAsStringAsync(ct);
         if (string.IsNullOrWhiteSpace(body))
-            return (null, null);
+        {
+            var statusText = $"HTTP {(int)response.StatusCode} ({response.ReasonPhrase ?? "Unknown"})";
+            var hint = response.StatusCode == HttpStatusCode.NotFound
+                ? " The server URL may be missing the Adept web app path (for example '/AdeptWeb/')."
+                : string.Empty;
+            var synthetic = new AuthenticateResponse
+            {
+                StatusCode = -1,
+                ErrorMessage = $"Login endpoint returned an empty response body from '{loginUrl}' with {statusText}.{hint}"
+            };
+            return (synthetic, string.Empty);
+        }
 
         AuthenticateResponse? auth;
         try
@@ -514,10 +526,13 @@ public class HttpAdeptAuthService : IAdeptAuthService
         catch (JsonException ex)
         {
             // Return a synthetic error response that surfaces the raw body for diagnosis.
+            var hint = response.StatusCode == HttpStatusCode.NotFound
+                ? " The server URL may be missing the Adept web app path (for example '/AdeptWeb/')."
+                : string.Empty;
             auth = new AuthenticateResponse
             {
                 StatusCode = -1,
-                ErrorMessage = $"Unexpected server response (HTTP {(int)response.StatusCode}): {ex.Message} — Body: {body[..Math.Min(300, body.Length)]}"
+                ErrorMessage = $"Unexpected server response (HTTP {(int)response.StatusCode}): {ex.Message} — Body: {body[..Math.Min(300, body.Length)]}.{hint}"
             };
         }
         return (auth, body);

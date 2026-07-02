@@ -3,6 +3,7 @@ using System.CommandLine.Builder;
 using System.CommandLine.Parsing;
 using AdeptTools.Cli.Commands;
 using AdeptTools.Cli.Infrastructure;
+using AdeptTools.Core.Auth;
 using AdeptTools.Core.Configuration;
 using AdeptTools.Core.Models;
 using Microsoft.Extensions.DependencyInjection;
@@ -42,6 +43,22 @@ rootCommand.AddCommand(ImportCommands.CreateImportCommand());
 // Build parser with DI middleware
 var parser = new CommandLineBuilder(rootCommand)
     .UseDefaults()
+    .UseExceptionHandler((ex, context) =>
+    {
+        var details = new List<string>();
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (!string.IsNullOrWhiteSpace(current.Message))
+                details.Add(current.Message);
+        }
+
+        var message = details.Count == 0
+            ? "Command failed due to an unexpected error."
+            : string.Join(" -> ", details);
+
+        Console.Error.WriteLine($"Error: {message}");
+        context.ExitCode = 1;
+    })
     .UseVersionOption()
     .AddMiddleware(async (context, next) =>
     {
@@ -93,8 +110,63 @@ var parser = new CommandLineBuilder(rootCommand)
         var serviceProvider = services.BuildServiceProvider();
         context.BindingContext.AddService<IServiceProvider>(_ => serviceProvider);
 
+        // Ensure command handlers have an active authenticated session unless this is the auth command path.
+        if (!mock && !IsAuthCommand(context.ParseResult.CommandResult))
+        {
+            var authService = serviceProvider.GetRequiredService<IAdeptAuthService>();
+            if (!authService.IsAuthenticated)
+            {
+                var loginUser = string.IsNullOrWhiteSpace(user) ? "ADM" : user;
+                var loginPassword = Environment.GetEnvironmentVariable("ADEPTTOOLS_PASSWORD") ?? string.Empty;
+
+                var authResult = await authService.LoginAsync(
+                    server!,
+                    loginUser,
+                    loginPassword,
+                    context.GetCancellationToken());
+
+                if (!authResult.Success)
+                {
+                    var error = string.IsNullOrWhiteSpace(authResult.ErrorMessage)
+                        ? "Authentication failed."
+                        : authResult.ErrorMessage;
+
+                    Console.Error.WriteLine($"Error: unable to establish {backend} session. {error}");
+
+                    if (authResult.RequiresUserSelection)
+                    {
+                        Console.Error.WriteLine("Hint: run 'auth test' to choose the desired account, then rerun this command.");
+                    }
+                    else if (backend == BackendType.Com)
+                    {
+                        Console.Error.WriteLine("Hint: verify Adept desktop is open and logged in, or set ADEPTTOOLS_PASSWORD for direct login.");
+                    }
+
+                    context.ExitCode = 1;
+                    return;
+                }
+            }
+        }
+
         await next(context);
     })
     .Build();
 
 return await parser.InvokeAsync(args);
+
+static bool IsAuthCommand(CommandResult commandResult)
+{
+    SymbolResult? current = commandResult;
+    while (current is not null)
+    {
+        if (current is CommandResult currentCommand &&
+            string.Equals(currentCommand.Command.Name, "auth", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        current = current.Parent;
+    }
+
+    return false;
+}
