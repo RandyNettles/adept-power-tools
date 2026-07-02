@@ -745,6 +745,13 @@ public class WorkflowService : IWorkflowService
                     break;
 
                 case MatchConfidence.None:
+                    if (LooksLikeLoginId(entry.Trustee.TrusteeId))
+                    {
+                        // Accept direct LoginID values even when user-list enumeration is incomplete.
+                        // Server-side save still validates the trustee ID.
+                        break;
+                    }
+
                     result.Failures.Add(new TrusteeResolutionFailure
                     {
                         WorkflowName = entry.Workflow.Name,
@@ -766,6 +773,18 @@ public class WorkflowService : IWorkflowService
 
         var trimmed = trusteeId.Trim();
         return trimmed.Contains(' ') || trimmed.Contains(',');
+    }
+
+    private static bool LooksLikeLoginId(string trusteeId)
+    {
+        if (string.IsNullOrWhiteSpace(trusteeId))
+            return false;
+
+        var trimmed = trusteeId.Trim();
+        if (trimmed.Contains(' ') || trimmed.Contains(','))
+            return false;
+
+        return trimmed.All(c => char.IsLetterOrDigit(c) || c == '.' || c == '_' || c == '-');
     }
 
     private class TrusteeResolutionResult

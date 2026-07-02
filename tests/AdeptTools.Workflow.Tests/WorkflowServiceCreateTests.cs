@@ -192,6 +192,63 @@ public class WorkflowServiceCreateTests
         }
     }
 
+    [Fact]
+    public async Task CreateAsync_DryRun_AllowsLoginIdTrustees_WhenUserListIsIncomplete()
+    {
+        var client = new IncompleteUsersClient();
+        var service = CreateService(client);
+
+        var xmlPath = CreateTempXmlWithRoles(new[]
+        {
+            new WorkflowInputModel
+            {
+                Name = "TRN-20260702-01",
+                Active = true,
+                Steps = new List<WorkflowInputStep>
+                {
+                    new()
+                    {
+                        Name = "Draft",
+                        Trustees = new List<WorkflowInputTrustee>
+                        {
+                            new() { TrusteeId = "bill.stamp", TrusteeType = WorkflowUserType.User, Role = TrusteeRole.Reviewer }
+                        }
+                    }
+                }
+            },
+            new WorkflowInputModel
+            {
+                Name = "Design Review",
+                Active = true,
+                Steps = new List<WorkflowInputStep>
+                {
+                    new()
+                    {
+                        Name = "Review",
+                        Trustees = new List<WorkflowInputTrustee>
+                        {
+                            new() { TrusteeId = "asmith", TrusteeType = WorkflowUserType.User, Role = TrusteeRole.Reviewer }
+                        }
+                    }
+                }
+            }
+        });
+
+        try
+        {
+            var result = await service.CreateAsync(
+                new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = true });
+
+            Assert.Equal(2, result.Total);
+            Assert.Equal(2, result.Succeeded);
+            Assert.Equal(0, result.Failed);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
     // --- helpers ---
 
     private static WorkflowInputModel CreateSampleInput(string name, string[] stepNames)
@@ -317,6 +374,18 @@ public class WorkflowServiceCreateTests
         {
             _saved.Add(model);
             return Task.FromResult(ApiResult.Success("Captured."));
+        }
+    }
+
+    private class IncompleteUsersClient : MockWorkflowApiClient
+    {
+        public override Task<List<AdeptUserEntry>> GetUsersAsync(CancellationToken ct = default)
+        {
+            // Simulate a server response that does not include all valid login IDs.
+            return Task.FromResult(new List<AdeptUserEntry>
+            {
+                new() { UserId = "reviewer1", DisplayName = "Reviewer, First" }
+            });
         }
     }
 }

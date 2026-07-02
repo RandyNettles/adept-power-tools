@@ -121,7 +121,18 @@ public class HttpWorkflowApiClient : IWorkflowApiClient
         var primaryResponse = await GetAsyncWithAuthRefreshAsync(primaryEndpoint, ct);
         if (primaryResponse.IsSuccessStatusCode)
         {
-            return await primaryResponse.Content.ReadFromJsonAsync<List<AdeptUserEntry>>(JsonOptions, ct) ?? new List<AdeptUserEntry>();
+            var mappedUsers = await ReadPrimaryUsersAsync(primaryResponse.Content, ct);
+            var mergedUsers = await MergeWithLegacyUsersAsync(mappedUsers, ct);
+
+            if (mergedUsers.Count > 0)
+            {
+                return mergedUsers;
+            }
+
+            if (mappedUsers.Count > 0)
+            {
+                return mappedUsers;
+            }
         }
 
         if (primaryResponse.StatusCode != HttpStatusCode.NotFound)
@@ -158,6 +169,177 @@ public class HttpWorkflowApiClient : IWorkflowApiClient
             ct);
 
         return new List<AdeptUserEntry>();
+    }
+
+    private async Task<List<AdeptUserEntry>> MergeWithLegacyUsersAsync(
+        List<AdeptUserEntry> primaryUsers,
+        CancellationToken ct)
+    {
+        var legacyEndpoint = "api/Account/UserInfo/EmailList";
+        try
+        {
+            var legacyResponse = await GetAsyncWithAuthRefreshAsync(legacyEndpoint, ct);
+            if (!legacyResponse.IsSuccessStatusCode)
+            {
+                return primaryUsers;
+            }
+
+            var legacyUsers = await legacyResponse.Content.ReadFromJsonAsync<List<LegacyUserInfo>>(JsonOptions, ct)
+                ?? new List<LegacyUserInfo>();
+
+            if (legacyUsers.Count == 0)
+            {
+                return primaryUsers;
+            }
+
+            var merged = new Dictionary<string, AdeptUserEntry>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var user in primaryUsers)
+            {
+                if (string.IsNullOrWhiteSpace(user.UserId))
+                    continue;
+
+                merged[user.UserId] = new AdeptUserEntry
+                {
+                    UserId = user.UserId,
+                    DisplayName = user.DisplayName
+                };
+            }
+
+            foreach (var legacy in legacyUsers)
+            {
+                if (string.IsNullOrWhiteSpace(legacy.LoginName))
+                    continue;
+
+                var userId = legacy.LoginName.Trim();
+                var displayName = string.IsNullOrWhiteSpace(legacy.UserName)
+                    ? userId
+                    : legacy.UserName;
+
+                merged[userId] = new AdeptUserEntry
+                {
+                    UserId = userId,
+                    DisplayName = displayName
+                };
+            }
+
+            return merged.Values.ToList();
+        }
+        catch
+        {
+            // Best-effort merge only; keep primary users if legacy route is unavailable.
+            return primaryUsers;
+        }
+    }
+
+    private async Task<List<AdeptUserEntry>> ReadPrimaryUsersAsync(HttpContent content, CancellationToken ct)
+    {
+        var payload = await content.ReadFromJsonAsync<JsonElement>(JsonOptions, ct);
+        if (payload.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            return new List<AdeptUserEntry>();
+
+        var users = new Dictionary<string, AdeptUserEntry>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var item in EnumerateUserItems(payload))
+        {
+            if (item.ValueKind != JsonValueKind.Object)
+                continue;
+
+            var userId = FirstNonEmpty(
+                GetStringProperty(item, "loginId"),
+                GetStringProperty(item, "loginName"),
+                GetStringProperty(item, "userName"),
+                GetStringProperty(item, "userId"),
+                GetStringProperty(item, "id"));
+
+            if (string.IsNullOrWhiteSpace(userId))
+                continue;
+
+            var displayName = FirstNonEmpty(
+                GetStringProperty(item, "displayName"),
+                GetStringProperty(item, "fullName"),
+                GetStringProperty(item, "name"),
+                GetStringProperty(item, "userName"),
+                userId);
+
+            users[userId] = new AdeptUserEntry
+            {
+                UserId = userId,
+                DisplayName = displayName
+            };
+        }
+
+        return users.Values.ToList();
+    }
+
+    private static IEnumerable<JsonElement> EnumerateUserItems(JsonElement payload)
+    {
+        if (payload.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in payload.EnumerateArray())
+                yield return item;
+
+            yield break;
+        }
+
+        if (payload.ValueKind != JsonValueKind.Object)
+            yield break;
+
+        foreach (var key in new[] { "users", "items", "data", "results" })
+        {
+            if (TryGetPropertyIgnoreCase(payload, key, out var container) &&
+                container.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in container.EnumerateArray())
+                    yield return item;
+
+                yield break;
+            }
+        }
+
+        // Some installations return a single user object.
+        yield return payload;
+    }
+
+    private static string GetStringProperty(JsonElement item, string propertyName)
+    {
+        if (!TryGetPropertyIgnoreCase(item, propertyName, out var value))
+            return string.Empty;
+
+        return value.ValueKind switch
+        {
+            JsonValueKind.String => value.GetString() ?? string.Empty,
+            JsonValueKind.Number => value.ToString(),
+            JsonValueKind.True => bool.TrueString,
+            JsonValueKind.False => bool.FalseString,
+            _ => string.Empty
+        };
+    }
+
+    private static bool TryGetPropertyIgnoreCase(JsonElement element, string propertyName, out JsonElement value)
+    {
+        foreach (var prop in element.EnumerateObject())
+        {
+            if (string.Equals(prop.Name, propertyName, StringComparison.OrdinalIgnoreCase))
+            {
+                value = prop.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
+    private static string FirstNonEmpty(params string[] values)
+    {
+        foreach (var value in values)
+        {
+            if (!string.IsNullOrWhiteSpace(value))
+                return value.Trim();
+        }
+
+        return string.Empty;
     }
 
     private async Task<HttpResponseMessage> GetAsyncWithAuthRefreshAsync(string endpoint, CancellationToken ct)

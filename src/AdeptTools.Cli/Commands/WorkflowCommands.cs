@@ -153,6 +153,7 @@ public static class WorkflowCommands
 
             Console.WriteLine();
             Console.WriteLine($"  Summary: {result.Total} total, {result.Succeeded} succeeded, {result.Failed} failed, {result.Skipped} skipped");
+            WriteDetailedOperationResults(result);
 
             context.ExitCode = result.Failed > 0 ? 1 : 0;
         });
@@ -226,6 +227,7 @@ public static class WorkflowCommands
 
             Console.WriteLine();
             Console.WriteLine($"  Summary: {result.Total} total, {result.Succeeded} succeeded, {result.Failed} failed, {result.Skipped} skipped");
+            WriteDetailedOperationResults(result);
 
             context.ExitCode = result.Failed > 0 ? 1 : 0;
         });
@@ -368,5 +370,31 @@ public static class WorkflowCommands
         if (!string.IsNullOrWhiteSpace(excel)) return excel;
         if (!string.IsNullOrWhiteSpace(xml)) return xml;
         return null;
+    }
+
+    private static void WriteDetailedOperationResults(WorkflowBatchResult result)
+    {
+        if (result.Results.Count == 0)
+            return;
+
+        var shouldPrint = result.Results.Any(r => r.Status != WorkflowResultStatus.Success);
+        if (!shouldPrint)
+            return;
+
+        Console.WriteLine();
+        Console.WriteLine("  Operation Results:");
+
+        foreach (var item in result.Results)
+        {
+            var statusLabel = item.Status switch
+            {
+                WorkflowResultStatus.Success => "[OK]",
+                WorkflowResultStatus.Fail => "[FAIL]",
+                _ => "[SKIP]"
+            };
+
+            var workflowName = string.IsNullOrWhiteSpace(item.WorkflowName) ? "Unknown" : item.WorkflowName;
+            Console.WriteLine($"  {statusLabel} {workflowName}: {item.Message}");
+        }
     }
 }

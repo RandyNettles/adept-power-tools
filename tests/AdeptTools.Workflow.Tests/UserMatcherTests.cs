@@ -127,4 +127,34 @@ public class UserMatcherTests
         Assert.Equal(MatchConfidence.Weak, result.Confidence);
         Assert.Equal("akhan", result.ResolvedUserId);
     }
+
+    [Fact]
+    public void Match_CanonicalLoginId_DotVsCompact_ReturnsStrong()
+    {
+        var users = new List<AdeptUserEntry>
+        {
+            new() { UserId = "billstamp", DisplayName = "Bill Stamp" }
+        };
+
+        var matcher = new UserMatcher(users);
+        var result = matcher.Match("bill.stamp");
+
+        Assert.Equal(MatchConfidence.Strong, result.Confidence);
+        Assert.Equal("billstamp", result.ResolvedUserId);
+    }
+
+    [Fact]
+    public void Match_CanonicalLoginId_CaseInsensitiveWithDot_ReturnsStrong()
+    {
+        var users = new List<AdeptUserEntry>
+        {
+            new() { UserId = "A.Smith", DisplayName = "Smith, Amy" }
+        };
+
+        var matcher = new UserMatcher(users);
+        var result = matcher.Match("asmith");
+
+        Assert.Equal(MatchConfidence.Strong, result.Confidence);
+        Assert.Equal("A.Smith", result.ResolvedUserId);
+    }
 }

@@ -27,7 +27,27 @@ public class UserMatcher
             };
         }
 
-        // 2. Exact match on DisplayName (case-insensitive)
+        // 2. Canonical login-ID match (case-insensitive, ignores separators)
+        var normalizedInputId = NormalizeLoginId(trimmed);
+        if (!string.IsNullOrEmpty(normalizedInputId))
+        {
+            var canonicalMatches = _users.Where(u =>
+                string.Equals(NormalizeLoginId(u.UserId), normalizedInputId, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (canonicalMatches.Count == 1)
+            {
+                return new UserMatchResult
+                {
+                    InputValue = trimmed,
+                    ResolvedUserId = canonicalMatches[0].UserId,
+                    MatchedDisplayName = canonicalMatches[0].DisplayName,
+                    Confidence = MatchConfidence.Strong
+                };
+            }
+        }
+
+        // 3. Exact match on DisplayName (case-insensitive)
         var exactDisplay = _users.FirstOrDefault(u =>
             string.Equals(u.DisplayName, trimmed, StringComparison.OrdinalIgnoreCase));
         if (exactDisplay is not null)
@@ -41,7 +61,7 @@ public class UserMatcher
             };
         }
 
-        // 3. Normalized name match — "Last, First" ↔ "First Last"
+        // 4. Normalized name match — "Last, First" ↔ "First Last"
         var normalized = NormalizeName(trimmed);
         foreach (var user in _users)
         {
@@ -58,7 +78,30 @@ public class UserMatcher
             }
         }
 
-        // 4. Partial match — last name + first initial
+        // 5. Login-style alias match (e.g., first.last, fLast, firstlast)
+        var aliasMatches = FindAliasMatches(trimmed).ToList();
+        if (aliasMatches.Count == 1)
+        {
+            var aliasMatch = aliasMatches[0];
+            return new UserMatchResult
+            {
+                InputValue = trimmed,
+                ResolvedUserId = aliasMatch.UserId,
+                MatchedDisplayName = aliasMatch.DisplayName,
+                Confidence = MatchConfidence.Strong
+            };
+        }
+
+        if (aliasMatches.Count > 1)
+        {
+            return new UserMatchResult
+            {
+                InputValue = trimmed,
+                Confidence = MatchConfidence.Weak
+            };
+        }
+
+        // 6. Partial match — last name + first initial
         var (inputFirst, inputLast) = SplitName(trimmed);
         if (!string.IsNullOrEmpty(inputLast))
         {
@@ -102,7 +145,7 @@ public class UserMatcher
             }
         }
 
-        // 5. Single-token match against last names (handles "Rameshbabu" style input)
+        // 7. Single-token match against last names (handles "Rameshbabu" style input)
         if (!trimmed.Contains(' ') && !trimmed.Contains(','))
         {
             var lastNameMatches = _users.Where(u =>
@@ -123,7 +166,7 @@ public class UserMatcher
             }
         }
 
-        // 6. No match
+        // 8. No match
         return new UserMatchResult
         {
             InputValue = trimmed,
@@ -175,5 +218,74 @@ public class UserMatcher
 
         // Single token — treat as last name
         return (string.Empty, name.Trim());
+    }
+
+    private static string NormalizeLoginId(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        var chars = value.Trim()
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToLowerInvariant)
+            .ToArray();
+
+        return new string(chars);
+    }
+
+    private IEnumerable<AdeptUserEntry> FindAliasMatches(string input)
+    {
+        var (inputFirst, inputLast, firstInitialOnly) = ParseAliasInput(input);
+        if (string.IsNullOrEmpty(inputLast))
+            return Enumerable.Empty<AdeptUserEntry>();
+
+        var matches = _users.Where(user =>
+        {
+            var (userFirst, userLast) = SplitName(user.DisplayName);
+            if (string.IsNullOrWhiteSpace(userFirst) || string.IsNullOrWhiteSpace(userLast))
+                return false;
+
+            if (!string.Equals(userLast, inputLast, StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            if (firstInitialOnly)
+            {
+                return !string.IsNullOrWhiteSpace(inputFirst) &&
+                       char.ToUpperInvariant(userFirst[0]) == char.ToUpperInvariant(inputFirst[0]);
+            }
+
+            return string.Equals(userFirst, inputFirst, StringComparison.OrdinalIgnoreCase) ||
+                   userFirst.StartsWith(inputFirst, StringComparison.OrdinalIgnoreCase);
+        }).ToList();
+
+        return matches;
+    }
+
+    private static (string First, string Last, bool FirstInitialOnly) ParseAliasInput(string input)
+    {
+        var trimmed = input.Trim();
+        if (trimmed.Length < 2)
+            return (string.Empty, string.Empty, false);
+
+        if (trimmed.IndexOfAny(new[] { '.', '_', '-' }) >= 0)
+        {
+            var parts = trimmed
+                .Split(new[] { '.', '_', '-' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+            if (parts.Length == 2)
+                return (parts[0], parts[1], false);
+
+            return (string.Empty, string.Empty, false);
+        }
+
+        if (trimmed.Contains(' ') || trimmed.Contains(','))
+            return (string.Empty, string.Empty, false);
+
+        // fLast (e.g., asmith)
+        var first = trimmed[..1];
+        var last = trimmed[1..];
+        if (last.Length > 0)
+            return (first, last, true);
+
+        return (string.Empty, string.Empty, false);
     }
 }
