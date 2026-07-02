@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Net.Http;
 using AdeptTools.Backend.Com.Api;
 using AdeptTools.Backend.Com.Auth;
 using AdeptTools.Backend.Com.Infrastructure;
@@ -98,7 +99,13 @@ public partial class App : Application
 
         // Auth service factory — returns mock, HTTP, or COM based on runtime state
         services.AddSingleton<MockAdeptAuthService>();
-        services.AddHttpClient<HttpAdeptAuthService>();
+        services.AddHttpClient("AdeptAuth");
+        services.AddSingleton<HttpAdeptAuthService>(sp =>
+        {
+            var authHttpClient = sp.GetRequiredService<IHttpClientFactory>().CreateClient("AdeptAuth");
+            return new HttpAdeptAuthService(authHttpClient);
+        });
+        services.AddSingleton<IAdeptAuthService>(sp => sp.GetRequiredService<HttpAdeptAuthService>());
         services.AddSingleton<Func<BackendType, IAdeptAuthService>>(sp =>
         {
             return (backend) =>
@@ -113,7 +120,9 @@ public partial class App : Application
 
         // Workflow services — returns mock or HTTP based on runtime toggle
         services.AddSingleton<MockWorkflowApiClient>();
-        services.AddTransient<BearerTokenHandler>(sp => new BearerTokenHandler(() => httpClientConfig.AccessToken));
+        services.AddTransient<BearerTokenHandler>(sp =>
+            new BearerTokenHandler(() =>
+                sp.GetRequiredService<HttpAdeptAuthService>().AccessToken ?? httpClientConfig.AccessToken));
         services.AddHttpClient<HttpWorkflowApiClient>(client =>
         {
             if (!string.IsNullOrEmpty(httpClientConfig.BaseUrl))

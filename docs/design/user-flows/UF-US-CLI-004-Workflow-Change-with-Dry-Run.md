@@ -3,10 +3,15 @@
 - Story reference: US-CLI-004
 - FR reference: FR-006
 - Status: Backfilled from implementation
-- Last updated: 2026-06-29
+- Last updated: 2026-07-02
 
 ## Goal
 Allow users to create or update workflows from a file, with the option to preview results before applying changes.
+
+## Proposed Revision
+- Planned CLI safety addition: [UF-US-CLI-004a-Workflow-Change-Review-and-Confirm.md](UF-US-CLI-004a-Workflow-Change-Review-and-Confirm.md)
+- Proposed behavior: keep preview as an explicit `--dry-run` invocation, and add an interactive confirmation step before mutating create or modify execution.
+- The primary flow below reflects current implementation; the proposal document captures the requested future-state CLI interaction.
 
 ## User Flow (Primary)
 
@@ -75,3 +80,4 @@ flowchart TD
 - Output should make it easy to distinguish between preview and actual execution
 - Errors should be tied to specific items when possible
 - Summary counts should match the detailed output for traceability
+- If the proposal is implemented, interactive mutating create/modify runs should confirm intent before execution while preserving a non-interactive bypass for automation.

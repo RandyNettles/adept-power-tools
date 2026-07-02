@@ -24,6 +24,10 @@
   - File: docs/design/user-flows/UF-US-CLI-004-Workflow-Change-with-Dry-Run.md
   - Source story: docs/prd/user_stories/US-CLI.md
   - Source requirement: FR-006 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
+- UF-US-CLI-004a: Workflow Change Review and Confirm
+  - File: docs/design/user-flows/UF-US-CLI-004a-Workflow-Change-Review-and-Confirm.md
+  - Source story: docs/prd/user_stories/US-CLI.md
+  - Source requirement: proposed UX refinement to FR-006; do not add to the implementation-baseline FR document until behavior is implemented
 - UF-US-CLI-005: Safe Workflow Deletion
   - File: docs/design/user-flows/UF-US-CLI-005-Safe-Workflow-Delete.md
   - Source story: docs/prd/user_stories/US-CLI.md
@@ -68,6 +72,10 @@
   - File: docs/design/user-flows/UF-US-WF-006c-Client-Workflow-Delete.md
   - Source story: docs/prd/user_stories/US-Workflow.md
   - Source requirement: FR-031 in docs/functional_requirements/FR-AdeptTools-Implementation-Baseline-2026-06-29.md
+- UF-US-WF-006d: Client Workflow Review Before Apply
+  - File: docs/design/user-flows/UF-US-WF-006d-Client-Workflow-Review-Before-Apply.md
+  - Source story: docs/prd/user_stories/US-Workflow.md
+  - Source requirement: proposed UX refinement to FR-031; do not add to the implementation-baseline FR document until behavior is implemented
 - UF-US-IMP-007: Client Import Operations
   - File: docs/design/user-flows/UF-US-IMP-007-Client-Import-Operations.md
   - Source story: docs/prd/user_stories/US-Import.md

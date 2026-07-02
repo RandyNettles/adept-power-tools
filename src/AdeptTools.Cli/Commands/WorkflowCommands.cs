@@ -92,11 +92,14 @@ public static class WorkflowCommands
         var excelOption = new Option<string?>("--excel", "Path to Excel workbook (.xlsx)");
         var xmlOption = new Option<string?>("--xml", "Path to XML config file (.xml)");
         var dryRunOption = new Option<bool>("--dry-run", "Validate only; do not create workflows");
+        var forceOption = new Option<bool>("--force", "Skip interactive confirmation prompt before creating workflows");
+        forceOption.AddAlias("--yes");
 
         var cmd = new Command("create", "Create workflows from an Excel or XML file");
         cmd.AddOption(excelOption);
         cmd.AddOption(xmlOption);
         cmd.AddOption(dryRunOption);
+        cmd.AddOption(forceOption);
 
         cmd.SetHandler(async (InvocationContext context) =>
         {
@@ -107,6 +110,7 @@ public static class WorkflowCommands
             var excel = context.ParseResult.GetValueForOption(excelOption);
             var xml = context.ParseResult.GetValueForOption(xmlOption);
             var dryRun = context.ParseResult.GetValueForOption(dryRunOption);
+            var force = context.ParseResult.GetValueForOption(forceOption);
 
             var filePath = ResolveInputFile(excel, xml);
             if (filePath is null)
@@ -114,6 +118,18 @@ public static class WorkflowCommands
                 Console.Error.WriteLine("Error: --excel or --xml is required.");
                 context.ExitCode = 1;
                 return;
+            }
+
+            if (!dryRun && !force && !settings.MockMode)
+            {
+                Console.Write("\n  Create workflows from this file? [y/N] ");
+                var response = Console.ReadLine();
+                if (!string.Equals(response?.Trim(), "y", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine("  Cancelled.");
+                    context.ExitCode = 0;
+                    return;
+                }
             }
 
             var logger = new ResultLogger(settings.Verbose);
@@ -149,11 +165,14 @@ public static class WorkflowCommands
         var excelOption = new Option<string?>("--excel", "Path to Excel workbook (.xlsx)");
         var xmlOption = new Option<string?>("--xml", "Path to XML config file (.xml)");
         var dryRunOption = new Option<bool>("--dry-run", "Validate only; do not modify workflows");
+        var forceOption = new Option<bool>("--force", "Skip interactive confirmation prompt before modifying workflows");
+        forceOption.AddAlias("--yes");
 
         var cmd = new Command("modify", "Modify existing workflows from an Excel or XML file");
         cmd.AddOption(excelOption);
         cmd.AddOption(xmlOption);
         cmd.AddOption(dryRunOption);
+        cmd.AddOption(forceOption);
 
         cmd.SetHandler(async (InvocationContext context) =>
         {
@@ -164,6 +183,7 @@ public static class WorkflowCommands
             var excel = context.ParseResult.GetValueForOption(excelOption);
             var xml = context.ParseResult.GetValueForOption(xmlOption);
             var dryRun = context.ParseResult.GetValueForOption(dryRunOption);
+            var force = context.ParseResult.GetValueForOption(forceOption);
 
             var filePath = ResolveInputFile(excel, xml);
             if (filePath is null)
@@ -171,6 +191,18 @@ public static class WorkflowCommands
                 Console.Error.WriteLine("Error: --excel or --xml is required.");
                 context.ExitCode = 1;
                 return;
+            }
+
+            if (!dryRun && !force && !settings.MockMode)
+            {
+                Console.Write("\n  Modify workflows from this file? [y/N] ");
+                var response = Console.ReadLine();
+                if (!string.Equals(response?.Trim(), "y", StringComparison.OrdinalIgnoreCase))
+                {
+                    Console.WriteLine("  Cancelled.");
+                    context.ExitCode = 0;
+                    return;
+                }
             }
 
             var logger = new ResultLogger(settings.Verbose);

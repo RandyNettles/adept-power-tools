@@ -4,7 +4,7 @@
 - FR reference: FR-031
 - Surface: GUI (Client)
 - Status: Backfilled from implementation
-- Last updated: 2026-06-30
+- Last updated: 2026-07-02
 
 ## Goal
 Provide a single landing page for client workflow operations while delegating Create, Modify, and Delete behavior to dedicated user-flow documents.
@@ -13,6 +13,10 @@ Provide a single landing page for client workflow operations while delegating Cr
 - Create: [UF-US-WF-006a-Client-Workflow-Create.md](UF-US-WF-006a-Client-Workflow-Create.md)
 - Modify: [UF-US-WF-006b-Client-Workflow-Modify.md](UF-US-WF-006b-Client-Workflow-Modify.md)
 - Delete: [UF-US-WF-006c-Client-Workflow-Delete.md](UF-US-WF-006c-Client-Workflow-Delete.md)
+
+## Proposed UX Revision
+- Review-before-apply for Create and Modify: [UF-US-WF-006d-Client-Workflow-Review-Before-Apply.md](UF-US-WF-006d-Client-Workflow-Review-Before-Apply.md)
+- This proposal adds a read-only preview results step before any mutating Create or Modify execution is enabled.
 
 ## Summary Flow
 1. User navigates to the Workflows page after connecting.
@@ -49,3 +53,4 @@ flowchart TD
 - Progress feedback should update continuously for long-running operations.
 - Results should be easy to review, copy, or clear.
 - Destructive actions (delete) should always require confirmation.
+- Mutating create and modify actions may benefit from the same explicit review-before-apply pattern already used by delete confirmation.

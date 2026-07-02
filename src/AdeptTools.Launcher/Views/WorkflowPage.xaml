@@ -55,6 +55,7 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <!-- Action Buttons Row -->
@@ -85,6 +86,14 @@
                     <Button Content="Modify from File"
                             Command="{Binding ModifyFromFileCommand}"
                             Style="{StaticResource SecondaryButtonStyle}"
+                            Height="{StaticResource ButtonHeightSmall}"
+                            Padding="12,0"
+                            Margin="0,0,8,0" />
+
+                        <Button Content="{Binding PendingApplyButtonText}"
+                            Command="{Binding ApplyPendingChangesCommand}"
+                            Visibility="{Binding HasPendingApply, Converter={StaticResource BoolToVis}}"
+                            Style="{StaticResource PrimaryButtonStyle}"
                             Height="{StaticResource ButtonHeightSmall}"
                             Padding="12,0"
                             Margin="0,0,8,0" />
@@ -141,6 +150,13 @@
                                    Foreground="{StaticResource Neutral600Brush}" />
                     </CheckBox>
                 </Grid>
+
+                <TextBlock Grid.Row="2"
+                           Text="{Binding PendingApplyHintText}"
+                           Visibility="{Binding HasPendingApply, Converter={StaticResource BoolToVis}}"
+                           FontSize="{StaticResource FontSizeCaption2}"
+                           Foreground="{StaticResource Neutral600Brush}"
+                           Margin="0,8,0,0" />
             </Grid>
         </Border>
 

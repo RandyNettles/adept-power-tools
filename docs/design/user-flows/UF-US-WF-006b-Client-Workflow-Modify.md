@@ -4,10 +4,15 @@
 - FR reference: FR-031
 - Surface: GUI (Client)
 - Status: Backfilled from implementation
-- Last updated: 2026-06-30
+- Last updated: 2026-07-02
 
 ## Goal
 Allow users to modify existing workflows from input files with optional dry-run, progress visibility, and clear per-item outcomes.
+
+## Proposed Revision
+- Planned UX addition: [UF-US-WF-006d-Client-Workflow-Review-Before-Apply.md](UF-US-WF-006d-Client-Workflow-Review-Before-Apply.md)
+- Proposed behavior: after file validation, the client runs a read-only preview and presents reviewable Operation Results before enabling a separate apply action.
+- The primary flow below reflects current implementation; the proposal document captures the requested future-state interaction.
 
 ## User Flow (Primary)
 1. User navigates to the Workflows page after connecting.
@@ -67,3 +72,4 @@ flowchart TD
 - Modify mode should clearly indicate existing workflows may be changed.
 - Dry-run must clearly indicate no server mutation.
 - Progress and errors should remain readable for large batches.
+- If the review-before-apply proposal is implemented, the apply action should remain disabled until preview results have completed and been reviewed.

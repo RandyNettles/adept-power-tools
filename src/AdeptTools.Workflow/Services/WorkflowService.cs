@@ -267,7 +267,7 @@ public class WorkflowService : IWorkflowService
                 {
                     WorkflowName = wf.Name,
                     Status = WorkflowResultStatus.Success,
-                    Message = $"Would modify ({wf.Steps.Count} steps, {trusteeCount} trustees)",
+                    Message = $"{wf.Name}: would modify ({wf.Steps.Count} steps, {trusteeCount} trustees)",
                     StepCount = wf.Steps.Count,
                     TrusteeCount = trusteeCount
                 };
@@ -373,7 +373,7 @@ public class WorkflowService : IWorkflowService
             {
                 WorkflowName = input.Name,
                 Status = WorkflowResultStatus.Success,
-                Message = $"Modified ({input.Steps.Count} steps, {totalTrustees} trustees)",
+                Message = $"{input.Name}: modified ({input.Steps.Count} steps, {totalTrustees} trustees)",
                 StepCount = input.Steps.Count,
                 TrusteeCount = totalTrustees
             };
@@ -667,70 +667,105 @@ public class WorkflowService : IWorkflowService
         List<WorkflowInputModel> workflows, CancellationToken ct)
     {
         var result = new TrusteeResolutionResult();
+        var userTrustees = workflows
+            .SelectMany(wf => wf.Steps.SelectMany(step => step.Trustees.Select(trustee => new
+            {
+                Workflow = wf,
+                Step = step,
+                Trustee = trustee
+            })))
+            .Where(x => x.Trustee.TrusteeType == WorkflowUserType.User)
+            .ToList();
 
         // Collect all User-type trustees
-        var hasUserTrustees = workflows.Any(wf =>
-            wf.Steps.Any(s =>
-                s.Trustees.Any(t => t.TrusteeType == WorkflowUserType.User)));
-
-        if (!hasUserTrustees)
+        if (userTrustees.Count == 0)
         {
             result.AllResolved = true;
             return result;
         }
 
-        // Fetch user list
-        var users = await _apiClient.GetUsersAsync(ct);
+        List<AdeptUserEntry> users;
+        try
+        {
+            users = await _apiClient.GetUsersAsync(ct);
+        }
+        catch (Exception ex) when (ex is HttpRequestException || ex is NotSupportedException)
+        {
+            var trusteesNeedingLookup = userTrustees
+                .Where(x => RequiresUserResolution(x.Trustee.TrusteeId))
+                .ToList();
+
+            if (trusteesNeedingLookup.Count == 0)
+            {
+                result.AllResolved = true;
+                return result;
+            }
+
+            foreach (var entry in trusteesNeedingLookup)
+            {
+                result.Failures.Add(new TrusteeResolutionFailure
+                {
+                    WorkflowName = entry.Workflow.Name,
+                    Message = $"Trustee \"{entry.Trustee.TrusteeId}\" in step \"{entry.Step.Name}\": " +
+                              "this server does not expose the user list endpoint needed for name resolution. " +
+                              "Provide the exact Adept user ID/login name instead."
+                });
+            }
+
+            result.AllResolved = false;
+            return result;
+        }
+
         var matcher = new UserMatcher(users);
 
-        foreach (var wf in workflows)
+        foreach (var entry in userTrustees)
         {
-            foreach (var step in wf.Steps)
+            var matchResult = matcher.Match(entry.Trustee.TrusteeId);
+
+            switch (matchResult.Confidence)
             {
-                foreach (var trustee in step.Trustees)
-                {
-                    if (trustee.TrusteeType != WorkflowUserType.User)
-                        continue;
+                case MatchConfidence.Exact:
+                    // Already valid — no change needed
+                    break;
 
-                    var matchResult = matcher.Match(trustee.TrusteeId);
+                case MatchConfidence.Strong:
+                    // Auto-resolve: replace input with the actual user ID
+                    entry.Trustee.TrusteeId = matchResult.ResolvedUserId!;
+                    result.Resolved.Add(matchResult);
+                    break;
 
-                    switch (matchResult.Confidence)
+                case MatchConfidence.Weak:
+                    result.Failures.Add(new TrusteeResolutionFailure
                     {
-                        case MatchConfidence.Exact:
-                            // Already valid — no change needed
-                            break;
+                        WorkflowName = entry.Workflow.Name,
+                        Message = $"Trustee \"{matchResult.InputValue}\" in step \"{entry.Step.Name}\": " +
+                                  $"weak match — did you mean \"{matchResult.ResolvedUserId}\" " +
+                                  $"({matchResult.MatchedDisplayName})?"
+                    });
+                    break;
 
-                        case MatchConfidence.Strong:
-                            // Auto-resolve: replace input with the actual user ID
-                            trustee.TrusteeId = matchResult.ResolvedUserId!;
-                            result.Resolved.Add(matchResult);
-                            break;
-
-                        case MatchConfidence.Weak:
-                            result.Failures.Add(new TrusteeResolutionFailure
-                            {
-                                WorkflowName = wf.Name,
-                                Message = $"Trustee \"{matchResult.InputValue}\" in step \"{step.Name}\": " +
-                                          $"weak match — did you mean \"{matchResult.ResolvedUserId}\" " +
-                                          $"({matchResult.MatchedDisplayName})?"
-                            });
-                            break;
-
-                        case MatchConfidence.None:
-                            result.Failures.Add(new TrusteeResolutionFailure
-                            {
-                                WorkflowName = wf.Name,
-                                Message = $"Trustee \"{matchResult.InputValue}\" in step \"{step.Name}\": " +
-                                          "no match found. Provide the Adept user ID."
-                            });
-                            break;
-                    }
-                }
+                case MatchConfidence.None:
+                    result.Failures.Add(new TrusteeResolutionFailure
+                    {
+                        WorkflowName = entry.Workflow.Name,
+                        Message = $"Trustee \"{matchResult.InputValue}\" in step \"{entry.Step.Name}\": " +
+                                  "no match found. Provide the Adept user ID."
+                    });
+                    break;
             }
         }
 
         result.AllResolved = result.Failures.Count == 0;
         return result;
+    }
+
+    private static bool RequiresUserResolution(string trusteeId)
+    {
+        if (string.IsNullOrWhiteSpace(trusteeId))
+            return true;
+
+        var trimmed = trusteeId.Trim();
+        return trimmed.Contains(' ') || trimmed.Contains(',');
     }
 
     private class TrusteeResolutionResult
