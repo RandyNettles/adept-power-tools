@@ -57,6 +57,28 @@ public class WorkflowListItemTests
     }
 
     [Fact]
+    public void IsLocked_WhenLockedByIsWhitespace_ReturnsFalse()
+    {
+        var adminItem = new WorkflowAdminItem
+        {
+            WorkflowId = "wf-457",
+            WorkflowName = "Whitespace Lock WF",
+            Active = true,
+            StepCount = 2,
+            InProcessCount = 0,
+            Delete = true,
+            Edit = true,
+            Share = true,
+            LockedByDisplayName = "   "
+        };
+
+        var item = new WorkflowListItem(adminItem);
+
+        Assert.False(item.IsLocked);
+        Assert.Null(item.LockedBy);
+    }
+
+    [Fact]
     public void IsSelected_DefaultsFalse_CanToggle()
     {
         var adminItem = new WorkflowAdminItem

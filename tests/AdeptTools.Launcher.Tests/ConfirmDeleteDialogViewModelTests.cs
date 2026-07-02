@@ -165,4 +165,22 @@ public class ConfirmDeleteDialogViewModelTests
 
         Assert.False(vm.DialogResult);
     }
+
+    [Fact]
+    public void Cancel_RaisesPropertyChangedForDialogResult()
+    {
+        var items = new List<WorkflowListItem> { CreateItem("wf-1", "WF1") };
+        var vm = new ConfirmDeleteDialogViewModel(items, isDryRun: false);
+        var raised = false;
+
+        vm.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(ConfirmDeleteDialogViewModel.DialogResult))
+                raised = true;
+        };
+
+        vm.CancelCommand.Execute(null);
+
+        Assert.True(raised);
+    }
 }

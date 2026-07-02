@@ -235,6 +235,29 @@ public class WorkflowServiceDeleteTests
         }
     }
 
+    /// <summary>
+    /// Mock client where lock owner is whitespace only.
+    /// </summary>
+    private class WhitespaceLockedByMockClient : MockWorkflowApiClient
+    {
+        public override Task<WorkflowAdminPacket> GetWorkflowsAsync(CancellationToken ct = default)
+        {
+            return Task.FromResult(new WorkflowAdminPacket
+            {
+                CurrentUserId = "MOCK_USER",
+                Workflows = new List<WorkflowAdminItem>
+                {
+                    new()
+                    {
+                        WorkflowId = "wf-space", WorkflowName = "Whitespace Lock WF",
+                        Active = true, StepCount = 1, Delete = true,
+                        LockedByDisplayName = "  "
+                    }
+                }
+            });
+        }
+    }
+
     [Fact]
     public async Task DeleteAsync_WorkflowIds_DeletesOnlySpecifiedIds()
     {
@@ -270,6 +293,23 @@ public class WorkflowServiceDeleteTests
         Assert.Equal(1, result.Total);
         Assert.Equal(1, result.Succeeded);
         Assert.Equal("Eligible WF", result.Results[0].WorkflowName);
+    }
+
+    [Fact]
+    public async Task DeleteAsync_WorkflowIds_WhitespaceLock_IsTreatedAsUnlocked()
+    {
+        var client = new WhitespaceLockedByMockClient();
+        var service = CreateService(client);
+
+        var result = await service.DeleteAsync(new WorkflowDeleteRequest
+        {
+            WorkflowIds = new List<string> { "wf-space" },
+            Force = true
+        });
+
+        Assert.Equal(1, result.Total);
+        Assert.Equal(1, result.Succeeded);
+        Assert.Equal("Whitespace Lock WF", result.Results[0].WorkflowName);
     }
 
     [Fact]

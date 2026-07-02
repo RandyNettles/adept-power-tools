@@ -407,7 +407,7 @@ public class WorkflowService : IWorkflowService
         {
             var idSet = new HashSet<string>(request.WorkflowIds, StringComparer.OrdinalIgnoreCase);
             matched = workflows
-                .Where(w => idSet.Contains(w.WorkflowId) && w.Delete && string.IsNullOrEmpty(w.LockedByDisplayName))
+                .Where(w => idSet.Contains(w.WorkflowId) && w.Delete && string.IsNullOrWhiteSpace(w.LockedByDisplayName))
                 .ToList();
         }
         else
@@ -639,7 +639,7 @@ public class WorkflowService : IWorkflowService
         result = result.Where(w => w.Delete);
 
         // Exclude locked workflows
-        result = result.Where(w => string.IsNullOrEmpty(w.LockedByDisplayName));
+        result = result.Where(w => string.IsNullOrWhiteSpace(w.LockedByDisplayName));
 
         return result.ToList();
     }

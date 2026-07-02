@@ -102,7 +102,7 @@ public class ComWorkflowApiClient : IWorkflowApiClient
                 Edit = InvokeGetBool(wfInfo, "CanEdit"),
                 Share = InvokeGetBool(wfInfo, "CanShare"),
                 Delete = InvokeGetBool(wfInfo, "CanDelete"),
-                LockedByDisplayName = InvokeGetString(wfInfo, "LockedByDisplayName")
+                LockedByDisplayName = NormalizeOptionalString(InvokeGetString(wfInfo, "LockedByDisplayName"))
             });
             ReleaseCom(ref wfInfo);
         }
@@ -899,6 +899,11 @@ public class ComWorkflowApiClient : IWorkflowApiClient
             target,
             null);
         return value?.ToString() ?? string.Empty;
+    }
+
+    private static string? NormalizeOptionalString(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
     private static int InvokeGetInt(object target, string name)

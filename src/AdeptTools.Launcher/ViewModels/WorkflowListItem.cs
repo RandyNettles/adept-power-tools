@@ -13,7 +13,7 @@ public partial class WorkflowListItem : ObservableObject
     public string? LockedBy { get; }
     public bool CanDelete { get; }
     public bool CanEdit { get; }
-    public bool IsLocked => LockedBy is not null;
+    public bool IsLocked => !string.IsNullOrWhiteSpace(LockedBy);
 
     [ObservableProperty]
     private bool _isSelected;
@@ -25,7 +25,9 @@ public partial class WorkflowListItem : ObservableObject
         IsActive = item.Active;
         StepCount = item.StepCount;
         InProcessCount = item.InProcessCount;
-        LockedBy = item.LockedByDisplayName;
+        LockedBy = string.IsNullOrWhiteSpace(item.LockedByDisplayName)
+            ? null
+            : item.LockedByDisplayName.Trim();
         CanDelete = item.Delete;
         CanEdit = item.Edit;
     }

@@ -27,7 +27,12 @@ public partial class ConfirmDeleteDialogViewModel : ObservableObject
     [ObservableProperty]
     private bool _isDryRun;
 
-    public bool? DialogResult { get; private set; }
+    private bool? _dialogResult;
+    public bool? DialogResult
+    {
+        get => _dialogResult;
+        private set => SetProperty(ref _dialogResult, value);
+    }
 
     public ConfirmDeleteDialogViewModel(IReadOnlyList<WorkflowListItem> selectedWorkflows, bool isDryRun)
     {
