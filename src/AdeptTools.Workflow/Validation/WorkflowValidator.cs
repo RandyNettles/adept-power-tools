@@ -116,12 +116,13 @@ public class WorkflowValidator
             }
             else if (step.Name.Length > maxStepNameLen)
             {
+                var preview = step.Name.Length > 30 ? step.Name[..30] + "..." : step.Name;
                 result.Errors.Add(new ValidationError
                 {
                     WorkflowName = wf.Name,
                     StepName = step.Name,
                     Field = "Step Name",
-                    Message = $"Step name exceeds maximum length ({step.Name.Length} > {maxStepNameLen})."
+                    Message = $"Step name exceeds maximum length ({step.Name.Length} > {maxStepNameLen}): '{preview}'"
                 });
             }
 

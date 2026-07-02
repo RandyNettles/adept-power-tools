@@ -124,6 +124,10 @@ public partial class TemplateViewModel : ObservableObject
             wf.Cells[5, 1].Value = "Active:";
             wf.Cells[5, 2].Value = "true";
 
+            // Instructions (row 6 — before the step table header, outside the data range)
+            wf.Cells[6, 1].Value = "Instructions: Each group of rows is a step. The first row starts a new step (fill in Step Name). " +
+                "Continuation rows (blank Step Name) add trustees to the previous step.";
+
             // Step table headers at row 7 — vertical layout (6 columns)
             wf.Cells[7, 1].Value = "Step Name";
             wf.Cells[7, 2].Value = "Approvals Required";
@@ -188,10 +192,7 @@ public partial class TemplateViewModel : ObservableObject
             wf.Column(5).Width = 10;
             wf.Column(6).Width = 12;
 
-            // Instructions row
-            wf.Cells[14, 1].Value = "Each group of rows is a workflow step. The first row of a group defines the step (Step Name + settings). " +
-                "Subsequent rows add trustees to that step. Leave Trustee blank on the step row if the step has no trustees. " +
-                "A cell may contain multiple comma-separated IDs sharing the same Type and Role.";
+
         }
 
         private static void BuildImportTemplate(ExcelPackage package)
