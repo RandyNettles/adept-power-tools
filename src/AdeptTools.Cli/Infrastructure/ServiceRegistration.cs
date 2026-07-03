@@ -96,5 +96,7 @@ public static class ServiceRegistration
         services.AddTransient<MappingValidator>();
         services.AddTransient<SearchBuilder>();
         services.AddTransient<AutoMapper>();
+
+        services.AddSingleton<CliAuthSessionStore>();
     }
 }

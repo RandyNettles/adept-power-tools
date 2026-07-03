@@ -317,6 +317,24 @@ public partial class ConnectViewModel : ObservableObject
         }
     }
 
+    private bool CanLogout() => Status == ConnectionStatus.Connected;
+
+    [RelayCommand(CanExecute = nameof(CanLogout))]
+    private async Task LogoutAsync(CancellationToken ct)
+    {
+        try
+        {
+            var authService = _authServiceFactory(SelectedBackend);
+            await authService.LogoutAsync(ct);
+        }
+        finally
+        {
+            _httpClientConfig.AccessToken = null;
+            _authSessionStore.Clear();
+            ResetConnectionStatus();
+        }
+    }
+
     private void ResetConnectionStatus()
     {
         Status = ConnectionStatus.Disconnected;
@@ -328,6 +346,7 @@ public partial class ConnectViewModel : ObservableObject
 
     partial void OnStatusChanged(ConnectionStatus value)
     {
+        LogoutCommand.NotifyCanExecuteChanged();
         StatusChanged?.Invoke(this, value);
     }
 

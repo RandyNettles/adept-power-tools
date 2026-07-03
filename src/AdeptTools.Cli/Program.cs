@@ -3,6 +3,7 @@ using System.CommandLine.Builder;
 using System.CommandLine.Parsing;
 using AdeptTools.Cli.Commands;
 using AdeptTools.Cli.Infrastructure;
+using AdeptTools.Backend.Http.Auth;
 using AdeptTools.Core.Auth;
 using AdeptTools.Core.Configuration;
 using AdeptTools.Core.Models;
@@ -114,6 +115,44 @@ var parser = new CommandLineBuilder(rootCommand)
         if (!mock && !IsAuthCommand(context.ParseResult.CommandResult))
         {
             var authService = serviceProvider.GetRequiredService<IAdeptAuthService>();
+            var sessionStore = serviceProvider.GetRequiredService<CliAuthSessionStore>();
+
+            // For HTTP backend, try to reuse a saved token first.
+            if (backend == BackendType.Http && !authService.IsAuthenticated && authService is HttpAdeptAuthService httpAuth)
+            {
+                var saved = sessionStore.Load();
+                var normalizedServer = server!.TrimEnd('/') + "/";
+                if (saved is not null &&
+                    !string.IsNullOrWhiteSpace(saved.ServerUrl) &&
+                    !string.IsNullOrWhiteSpace(saved.AccessToken) &&
+                    string.Equals(saved.ServerUrl.TrimEnd('/') + "/", normalizedServer, StringComparison.OrdinalIgnoreCase))
+                {
+                    var expiry = saved.AccessTokenExpiresUtc ?? httpAuth.GetAccessTokenExpiryUtc(saved.AccessToken);
+                    if (!expiry.HasValue || expiry.Value > DateTimeOffset.UtcNow)
+                    {
+                        var resumeResult = await httpAuth.TryResumeSessionAsync(
+                            server,
+                            saved.AccessToken,
+                            saved.RefreshToken,
+                            saved.AccessTokenExpiresUtc,
+                            userId: null,
+                            userName: saved.UserName,
+                            displayName: null,
+                            emailAddress: null,
+                            appVersion: null,
+                            workAreaId: null,
+                            context.GetCancellationToken());
+
+                        if (!resumeResult.Success)
+                            sessionStore.Clear();
+                    }
+                    else
+                    {
+                        sessionStore.Clear();
+                    }
+                }
+            }
+
             if (!authService.IsAuthenticated)
             {
                 var loginUser = string.IsNullOrWhiteSpace(user) ? "ADM" : user;
@@ -143,8 +182,23 @@ var parser = new CommandLineBuilder(rootCommand)
                         Console.Error.WriteLine("Hint: verify Adept desktop is open and logged in, or set ADEPTTOOLS_PASSWORD for direct login.");
                     }
 
+                    if (backend == BackendType.Http)
+                        sessionStore.Clear();
+
                     context.ExitCode = 1;
                     return;
+                }
+
+                if (backend == BackendType.Http && authService is HttpAdeptAuthService httpAuthAfterLogin)
+                {
+                    sessionStore.Save(new CliAuthSessionState
+                    {
+                        ServerUrl = server!.TrimEnd('/') + "/",
+                        AccessToken = authService.AccessToken!,
+                        RefreshToken = httpAuthAfterLogin.RefreshToken,
+                        AccessTokenExpiresUtc = httpAuthAfterLogin.GetAccessTokenExpiryUtc(authService.AccessToken),
+                        UserName = loginUser
+                    });
                 }
             }
         }

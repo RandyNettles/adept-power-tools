@@ -88,7 +88,7 @@ public class HttpAdeptAuthService : IAdeptAuthService
         }
     }
 
-    public async Task<AuthResult> TryResumeSessionAsync(
+    public Task<AuthResult> TryResumeSessionAsync(
         string serverUrl,
         string accessToken,
         string? refreshToken,
@@ -102,11 +102,11 @@ public class HttpAdeptAuthService : IAdeptAuthService
         CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(serverUrl) || string.IsNullOrWhiteSpace(accessToken))
-            return new AuthResult(false, "Saved session is incomplete.");
+            return Task.FromResult(new AuthResult(false, "Saved session is incomplete."));
 
         var expiry = accessTokenExpiresUtc ?? GetAccessTokenExpiryUtc(accessToken);
         if (expiry.HasValue && expiry.Value <= DateTimeOffset.UtcNow)
-            return new AuthResult(false, "Saved session has expired.");
+            return Task.FromResult(new AuthResult(false, "Saved session has expired."));
 
         _serverBaseUrl = serverUrl.TrimEnd('/') + "/";
         AccessToken = accessToken;
@@ -115,14 +115,7 @@ public class HttpAdeptAuthService : IAdeptAuthService
         _httpClient.DefaultRequestHeaders.Authorization =
             new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", AccessToken);
 
-        var refreshResult = await RefreshAsync(ct);
-        if (!refreshResult.Success)
-        {
-            await LogoutAsync(ct);
-            return new AuthResult(false, refreshResult.ErrorMessage ?? "Saved session is no longer valid.");
-        }
-
-        return new AuthResult(
+        return Task.FromResult(new AuthResult(
             Success: true,
             AccessToken: AccessToken,
             UserId: userId,
@@ -130,7 +123,7 @@ public class HttpAdeptAuthService : IAdeptAuthService
             DisplayName: displayName,
             EmailAddress: emailAddress,
             AppVersion: appVersion,
-            WorkAreaId: workAreaId);
+            WorkAreaId: workAreaId));
     }
 
     public async Task<AuthResult> LoginAsync(string serverUrl, string userName, string password = "", CancellationToken ct = default)

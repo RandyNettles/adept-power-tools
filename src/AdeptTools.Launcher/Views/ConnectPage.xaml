@@ -183,6 +183,10 @@
                         <Button Content="Test Connection"
                                 Command="{Binding TestConnectionCommand}"
                                 Style="{StaticResource PrimaryButtonStyle}" />
+                        <Button Content="Logout"
+                            Command="{Binding LogoutCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Margin="8,0,0,0" />
                         <Button Content="Cancel"
                                 Command="{Binding CancelTestConnectionCommand}"
                                 Style="{StaticResource SecondaryButtonStyle}"

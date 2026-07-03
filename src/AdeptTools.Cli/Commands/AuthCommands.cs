@@ -5,6 +5,7 @@ using AdeptTools.Core.Auth;
 using AdeptTools.Core.Configuration;
 using AdeptTools.Core.Models;
 using Microsoft.Extensions.DependencyInjection;
+using AdeptTools.Cli.Infrastructure;
 
 namespace AdeptTools.Cli.Commands;
 
@@ -14,6 +15,7 @@ public static class AuthCommands
     {
         var authCommand = new Command("auth", "Authentication commands");
         authCommand.AddCommand(CreateTestCommand());
+        authCommand.AddCommand(CreateLogoutCommand());
         return authCommand;
     }
 
@@ -152,5 +154,27 @@ public static class AuthCommands
         });
 
         return testCommand;
+    }
+
+    private static Command CreateLogoutCommand()
+    {
+        var logoutCommand = new Command("logout", "Log out and remove any saved session token");
+
+        logoutCommand.SetHandler(async (InvocationContext context) =>
+        {
+            var serviceProvider = context.BindingContext.GetRequiredService<IServiceProvider>();
+            var authService = serviceProvider.GetRequiredService<IAdeptAuthService>();
+            var sessionStore = serviceProvider.GetRequiredService<CliAuthSessionStore>();
+
+            await authService.LogoutAsync(context.GetCancellationToken());
+            sessionStore.Clear();
+
+            Console.WriteLine();
+            Console.WriteLine("  Status:     Logged out");
+            Console.WriteLine();
+            context.ExitCode = 0;
+        });
+
+        return logoutCommand;
     }
 }
