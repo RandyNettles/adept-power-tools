@@ -193,7 +193,162 @@ public class WorkflowServiceCreateTests
     }
 
     [Fact]
-    public async Task CreateAsync_DryRun_AllowsLoginIdTrustees_WhenUserListIsIncomplete()
+        public async Task CreateAsync_WithApproversNotify_UsesSentinelTargetId()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var capturingClient = new CapturingSaveClient(savedModels);
+        var service = CreateService(capturingClient);
+
+                var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Approvers Notify WF"" Active=""true"">
+            <Steps>
+                <Step Name=""Review Step"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                        <Trustee Id=""Approvers"" Type=""A"" Role=""Notify"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.CreateAsync(
+                new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Single(savedModels);
+
+            var step = savedModels[0].WorkflowStepModels[0];
+            Assert.Single(step.EmailNotificationList);
+            Assert.Equal(WorkflowParticipantConstants.ApproversSentinelTargetId, step.EmailNotificationList[0].TrusteeId);
+            Assert.Equal(WorkflowUserType.Approvers, step.EmailNotificationList[0].Type);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+        [Fact]
+        public async Task CreateAsync_PropagatesWorkflowActiveFlag_ToSavedModel()
+        {
+                var savedModels = new List<WorkflowEditModel>();
+                var capturingClient = new CapturingSaveClient(savedModels);
+                var service = CreateService(capturingClient);
+
+                var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Inactive WF"" Active=""false"">
+            <Steps>
+                <Step Name=""Review Step"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+                try
+                {
+                        var result = await service.CreateAsync(
+                                new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = false });
+
+                        Assert.Equal(1, result.Succeeded);
+                        Assert.Single(savedModels);
+                        Assert.False(savedModels[0].WorkflowDefinition.Active);
+                }
+                finally
+                {
+                        File.Delete(xmlPath);
+                }
+        }
+
+    [Fact]
+        public async Task CreateAsync_AllNotifyRecipientsInvalid_FailsWithActionableMessage()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var capturingClient = new CapturingSaveClient(savedModels);
+        var service = CreateService(capturingClient);
+
+                var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Invalid Notify WF"" Active=""true"">
+            <Steps>
+                <Step Name=""Review Step"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                        <Trustee Id=""bad-email"" Type=""Email"" Role=""Notify"" />
+                        <Trustee Id=""also-bad"" Type=""Email"" Role=""Alert"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.CreateAsync(
+                new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Failed);
+            Assert.Contains(result.Results, r =>
+                r.Status == WorkflowResultStatus.Fail &&
+                (r.Message ?? string.Empty).Contains("all notify/alert recipients are invalid", StringComparison.OrdinalIgnoreCase));
+            Assert.Empty(savedModels);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+        [Fact]
+        public async Task CreateAsync_PropagatesWorkflowSharedFlag_ToSavedModel()
+        {
+                var savedModels = new List<WorkflowEditModel>();
+            var sharedCalls = new List<(string WorkflowId, bool Shared)>();
+            var capturingClient = new CapturingSaveClient(savedModels, sharedCalls);
+                var service = CreateService(capturingClient);
+
+                var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Shared WF"" Active=""true"" Shared=""true"">
+            <Steps>
+                <Step Name=""Review Step"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+                try
+                {
+                        var result = await service.CreateAsync(
+                                new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = false });
+
+                        Assert.Equal(1, result.Succeeded);
+                        Assert.Single(savedModels);
+                        Assert.True(savedModels[0].WorkflowDefinition.Shared);
+                        Assert.Contains(sharedCalls, c => c.Shared);
+                }
+                finally
+                {
+                        File.Delete(xmlPath);
+                }
+        }
+
+    [Fact]
+    public async Task CreateAsync_DryRun_FailsUnresolvedUserTrustees_WhenUserListIsIncomplete()
     {
         var client = new IncompleteUsersClient();
         var service = CreateService(client);
@@ -240,8 +395,8 @@ public class WorkflowServiceCreateTests
                 new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = true });
 
             Assert.Equal(2, result.Total);
-            Assert.Equal(2, result.Succeeded);
-            Assert.Equal(0, result.Failed);
+            Assert.Equal(0, result.Succeeded);
+            Assert.Equal(2, result.Failed);
         }
         finally
         {
@@ -356,6 +511,13 @@ public class WorkflowServiceCreateTests
         return path;
     }
 
+    private static string CreateTempXmlRaw(string xml)
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"wf_test_{Guid.NewGuid():N}.xml");
+        File.WriteAllText(path, xml);
+        return path;
+    }
+
     private static string EscapeXml(string value)
     {
         return value.Replace("&", "&amp;").Replace("<", "&lt;").Replace(">", "&gt;").Replace("\"", "&quot;");
@@ -367,13 +529,37 @@ public class WorkflowServiceCreateTests
     private class CapturingSaveClient : MockWorkflowApiClient
     {
         private readonly List<WorkflowEditModel> _saved;
+        private readonly List<(string WorkflowId, bool Shared)> _sharedCalls;
 
-        public CapturingSaveClient(List<WorkflowEditModel> saved) => _saved = saved;
+        public CapturingSaveClient(List<WorkflowEditModel> saved, List<(string WorkflowId, bool Shared)>? sharedCalls = null)
+        {
+            _saved = saved;
+            _sharedCalls = sharedCalls ?? new List<(string WorkflowId, bool Shared)>();
+        }
 
         public override Task<ApiResult> SaveWorkflowAsync(WorkflowEditModel model, CancellationToken ct = default)
         {
             _saved.Add(model);
             return Task.FromResult(ApiResult.Success("Captured."));
+        }
+
+        public override Task<WorkflowEditModel> GetWorkflowAsync(string workflowId, CancellationToken ct = default)
+        {
+            var model = _saved.LastOrDefault(m =>
+                string.Equals(m.WorkflowDefinition.WorkflowId, workflowId, StringComparison.OrdinalIgnoreCase));
+
+            if (model is not null)
+            {
+                return Task.FromResult(model);
+            }
+
+            return base.GetWorkflowAsync(workflowId, ct);
+        }
+
+        public override Task<ApiResult> SetWorkflowSharedAsync(string workflowId, bool shared, CancellationToken ct = default)
+        {
+            _sharedCalls.Add((workflowId, shared));
+            return Task.FromResult(ApiResult.Success("Captured share state."));
         }
     }
 

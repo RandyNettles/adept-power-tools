@@ -26,17 +26,17 @@ public class WorkflowExcelReaderTests : IDisposable
             sheet.Cells[8, 1].Value = "Draft";
             sheet.Cells[8, 2].Value = 0;
             sheet.Cells[8, 3].Value = "false";
-            sheet.Cells[8, 4].Value = "jsmith";
-            sheet.Cells[8, 5].Value = "User";
-            sheet.Cells[8, 6].Value = "Reviewer";
+            sheet.Cells[8, 5].Value = "jsmith";
+            sheet.Cells[8, 6].Value = "User";
+            sheet.Cells[8, 7].Value = "Reviewer";
 
-            sheet.Cells[9, 4].Value = "Engineering";
-            sheet.Cells[9, 5].Value = "Group";
-            sheet.Cells[9, 6].Value = "Reviewer";
+            sheet.Cells[9, 5].Value = "Engineering";
+            sheet.Cells[9, 6].Value = "Group";
+            sheet.Cells[9, 7].Value = "Reviewer";
 
-            sheet.Cells[10, 4].Value = "bob@partner.com";
-            sheet.Cells[10, 5].Value = "Email";
-            sheet.Cells[10, 6].Value = "Notify";
+            sheet.Cells[10, 5].Value = "bob@partner.com";
+            sheet.Cells[10, 6].Value = "Email";
+            sheet.Cells[10, 7].Value = "Notify";
         });
 
         var reader = new WorkflowExcelReader();
@@ -72,23 +72,23 @@ public class WorkflowExcelReaderTests : IDisposable
             sheet.Cells[8, 1].Value = "Draft";
             sheet.Cells[8, 2].Value = 0;
             sheet.Cells[8, 3].Value = "false";
-            sheet.Cells[8, 4].Value = "jsmith";
-            sheet.Cells[8, 5].Value = "User";
-            sheet.Cells[8, 6].Value = "Reviewer";
+            sheet.Cells[8, 5].Value = "jsmith";
+            sheet.Cells[8, 6].Value = "User";
+            sheet.Cells[8, 7].Value = "Reviewer";
 
             // Step 2: "Review" with 3 trustees
             sheet.Cells[9, 1].Value = "Review";
             sheet.Cells[9, 2].Value = 2;
             sheet.Cells[9, 3].Value = "true";
-            sheet.Cells[9, 4].Value = "mjones";
-            sheet.Cells[9, 5].Value = "User";
-            sheet.Cells[9, 6].Value = "Reviewer";
-            sheet.Cells[10, 4].Value = "akhan";
-            sheet.Cells[10, 5].Value = "User";
-            sheet.Cells[10, 6].Value = "Reviewer";
-            sheet.Cells[11, 4].Value = "pm-notify";
-            sheet.Cells[11, 5].Value = "Group";
-            sheet.Cells[11, 6].Value = "Alert";
+            sheet.Cells[9, 5].Value = "mjones";
+            sheet.Cells[9, 6].Value = "User";
+            sheet.Cells[9, 7].Value = "Reviewer";
+            sheet.Cells[10, 5].Value = "akhan";
+            sheet.Cells[10, 6].Value = "User";
+            sheet.Cells[10, 7].Value = "Reviewer";
+            sheet.Cells[11, 5].Value = "pm-notify";
+            sheet.Cells[11, 6].Value = "Group";
+            sheet.Cells[11, 7].Value = "Alert";
 
             // Step 3: "Approved" with no trustees (terminal)
             sheet.Cells[12, 1].Value = "Approved";
@@ -141,9 +141,9 @@ public class WorkflowExcelReaderTests : IDisposable
             sheet.Cells[8, 1].Value = "Review";
             sheet.Cells[8, 2].Value = 1;
             sheet.Cells[8, 3].Value = "false";
-            sheet.Cells[8, 4].Value = "jsmith, mdoe, akhan";
-            sheet.Cells[8, 5].Value = "User";
-            sheet.Cells[8, 6].Value = "Reviewer";
+            sheet.Cells[8, 5].Value = "jsmith, mdoe, akhan";
+            sheet.Cells[8, 6].Value = "User";
+            sheet.Cells[8, 7].Value = "Reviewer";
         });
 
         var reader = new WorkflowExcelReader();
@@ -169,16 +169,16 @@ public class WorkflowExcelReaderTests : IDisposable
         var path = CreateVerticalWorkbook("EmptyRows", sheet =>
         {
             sheet.Cells[8, 1].Value = "Draft";
-            sheet.Cells[8, 4].Value = "jsmith";
-            sheet.Cells[8, 5].Value = "User";
-            sheet.Cells[8, 6].Value = "Reviewer";
+            sheet.Cells[8, 5].Value = "jsmith";
+            sheet.Cells[8, 6].Value = "User";
+            sheet.Cells[8, 7].Value = "Reviewer";
 
             // Empty row 9 (no step name, no trustee) — should be ignored
 
             sheet.Cells[10, 1].Value = "Review";
-            sheet.Cells[10, 4].Value = "mjones";
-            sheet.Cells[10, 5].Value = "User";
-            sheet.Cells[10, 6].Value = "Reviewer";
+            sheet.Cells[10, 5].Value = "mjones";
+            sheet.Cells[10, 6].Value = "User";
+            sheet.Cells[10, 7].Value = "Reviewer";
         });
 
         var reader = new WorkflowExcelReader();
@@ -196,17 +196,17 @@ public class WorkflowExcelReaderTests : IDisposable
         var path = CreateVerticalWorkbook("RoleTest", sheet =>
         {
             sheet.Cells[8, 1].Value = "Step1";
-            sheet.Cells[8, 4].Value = "user1";
-            sheet.Cells[8, 5].Value = "User";
-            sheet.Cells[8, 6].Value = "Reviewer";
+            sheet.Cells[8, 5].Value = "user1";
+            sheet.Cells[8, 6].Value = "User";
+            sheet.Cells[8, 7].Value = "Reviewer";
 
-            sheet.Cells[9, 4].Value = "user2";
-            sheet.Cells[9, 5].Value = "User";
-            sheet.Cells[9, 6].Value = "Notify";
+            sheet.Cells[9, 5].Value = "user2";
+            sheet.Cells[9, 6].Value = "User";
+            sheet.Cells[9, 7].Value = "Notify";
 
-            sheet.Cells[10, 4].Value = "user3";
-            sheet.Cells[10, 5].Value = "User";
-            sheet.Cells[10, 6].Value = "Alert";
+            sheet.Cells[10, 5].Value = "user3";
+            sheet.Cells[10, 6].Value = "User";
+            sheet.Cells[10, 7].Value = "Alert";
         });
 
         var reader = new WorkflowExcelReader();
@@ -216,6 +216,55 @@ public class WorkflowExcelReaderTests : IDisposable
         Assert.Equal(TrusteeRole.Reviewer, step.Trustees[0].Role);
         Assert.Equal(TrusteeRole.EmailNotify, step.Trustees[1].Role);
         Assert.Equal(TrusteeRole.AlertNotify, step.Trustees[2].Role);
+    }
+
+    [Fact]
+    public void Read_ContinuationRowsWithoutTypeRole_InheritsPreviousValues()
+    {
+        var path = CreateVerticalWorkbook("InheritedTypeRole", sheet =>
+        {
+            sheet.Cells[8, 1].Value = "Review";
+            sheet.Cells[8, 5].Value = "reviewer1";
+            sheet.Cells[8, 6].Value = "User";
+            sheet.Cells[8, 7].Value = "Reviewer";
+
+            // Continuation rows omit Type/Role and should inherit from prior trustee row.
+            sheet.Cells[9, 5].Value = "reviewer2";
+            sheet.Cells[10, 5].Value = "reviewer3";
+        });
+
+        var reader = new WorkflowExcelReader();
+        var result = reader.Read(path);
+
+        var step = result.Workflows[0].Steps[0];
+        Assert.Equal(3, step.Trustees.Count);
+
+        Assert.All(step.Trustees, t =>
+        {
+            Assert.Equal(WorkflowUserType.User, t.TrusteeType);
+            Assert.Equal(TrusteeRole.Reviewer, t.Role);
+        });
+    }
+
+    [Fact]
+    public void Read_RowWithoutType_DefaultsToUser()
+    {
+        var path = CreateVerticalWorkbook("DefaultType", sheet =>
+        {
+            sheet.Cells[8, 1].Value = "Review";
+            sheet.Cells[8, 5].Value = "reviewer1";
+            // Type intentionally blank
+            sheet.Cells[8, 7].Value = "Reviewer";
+        });
+
+        var reader = new WorkflowExcelReader();
+        var result = reader.Read(path);
+
+        var step = result.Workflows[0].Steps[0];
+        Assert.Single(step.Trustees);
+        Assert.Equal("reviewer1", step.Trustees[0].TrusteeId);
+        Assert.Equal(WorkflowUserType.User, step.Trustees[0].TrusteeType);
+        Assert.Equal(TrusteeRole.Reviewer, step.Trustees[0].Role);
     }
 
     [Fact]
@@ -238,13 +287,16 @@ public class WorkflowExcelReaderTests : IDisposable
             wf.Cells[4, 2].Value = "14";
             wf.Cells[5, 1].Value = "Active:";
             wf.Cells[5, 2].Value = "true";
+            wf.Cells[6, 1].Value = "Shared:";
+            wf.Cells[6, 2].Value = "true";
 
             wf.Cells[7, 1].Value = "Step Name";
             wf.Cells[7, 2].Value = "Approvals Required";
             wf.Cells[7, 3].Value = "Auto Advance";
-            wf.Cells[7, 4].Value = "Trustee";
-            wf.Cells[7, 5].Value = "Type";
-            wf.Cells[7, 6].Value = "Role";
+            wf.Cells[7, 4].Value = "Allow Empty Trustees";
+            wf.Cells[7, 5].Value = "Trustee";
+            wf.Cells[7, 6].Value = "Type";
+            wf.Cells[7, 7].Value = "Role";
 
             wf.Cells[8, 1].Value = "Step1";
 
@@ -259,6 +311,31 @@ public class WorkflowExcelReaderTests : IDisposable
         Assert.Equal("Test memo", workflow.Memo);
         Assert.Equal(14, workflow.TimeoutDays);
         Assert.True(workflow.Active);
+        Assert.True(workflow.Shared);
+    }
+
+    [Fact]
+    public void Read_AllowEmptyTrustees_ParsesColumn()
+    {
+        var path = CreateVerticalWorkbook("AllowEmpty", sheet =>
+        {
+            sheet.Cells[8, 1].Value = "Terminal";
+            sheet.Cells[8, 4].Value = "true";
+
+            sheet.Cells[9, 1].Value = "Review";
+            sheet.Cells[9, 4].Value = "false";
+            sheet.Cells[9, 5].Value = "reviewer1";
+            sheet.Cells[9, 6].Value = "User";
+            sheet.Cells[9, 7].Value = "Reviewer";
+        });
+
+        var reader = new WorkflowExcelReader();
+        var result = reader.Read(path);
+
+        var wf = result.Workflows[0];
+        Assert.Equal(2, wf.Steps.Count);
+        Assert.True(wf.Steps[0].AllowEmptyTrustees);
+        Assert.False(wf.Steps[1].AllowEmptyTrustees);
     }
 
     // --- Helper ---
@@ -282,14 +359,17 @@ public class WorkflowExcelReaderTests : IDisposable
         wf.Cells[4, 1].Value = "Deadline (days):";
         wf.Cells[5, 1].Value = "Active:";
         wf.Cells[5, 2].Value = "true";
+        wf.Cells[6, 1].Value = "Shared:";
+        wf.Cells[6, 2].Value = "false";
 
         // Vertical layout headers
         wf.Cells[7, 1].Value = "Step Name";
         wf.Cells[7, 2].Value = "Approvals Required";
         wf.Cells[7, 3].Value = "Auto Advance";
-        wf.Cells[7, 4].Value = "Trustee";
-        wf.Cells[7, 5].Value = "Type";
-        wf.Cells[7, 6].Value = "Role";
+        wf.Cells[7, 4].Value = "Allow Empty Trustees";
+        wf.Cells[7, 5].Value = "Trustee";
+        wf.Cells[7, 6].Value = "Type";
+        wf.Cells[7, 7].Value = "Role";
 
         configureSheet(wf);
 

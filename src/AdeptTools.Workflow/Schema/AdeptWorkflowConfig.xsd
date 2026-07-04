@@ -57,6 +57,7 @@
                               <xs:attribute name="Name" type="xs:string" use="required" />
                               <xs:attribute name="ApprovalsRequired" type="xs:int" default="0" />
                               <xs:attribute name="AutoAdvance" type="xs:boolean" default="false" />
+                              <xs:attribute name="AllowEmptyTrustees" type="xs:boolean" default="false" />
                             </xs:complexType>
                           </xs:element>
                         </xs:sequence>
@@ -65,6 +66,7 @@
                   </xs:sequence>
                   <xs:attribute name="Name" type="xs:string" use="required" />
                   <xs:attribute name="Active" type="xs:boolean" default="true" />
+                  <xs:attribute name="Shared" type="xs:boolean" default="false" />
                   <xs:attribute name="ExcludeSaturday" type="xs:boolean" default="false" />
                   <xs:attribute name="ExcludeSunday" type="xs:boolean" default="false" />
                 </xs:complexType>

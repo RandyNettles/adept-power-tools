@@ -5,8 +5,8 @@
         xmlns:vm="clr-namespace:AdeptTools.Launcher.ViewModels"
         xmlns:views="clr-namespace:AdeptTools.Launcher.Views"
         Title="Adept Toolbox"
-        Width="960" Height="640"
-        MinWidth="700" MinHeight="480"
+        Width="960" Height="760"
+        MinWidth="700" MinHeight="620"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource NeutralWhiteBrush}"
         FontFamily="{StaticResource FontFamilyPrimary}">

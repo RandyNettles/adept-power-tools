@@ -16,6 +16,7 @@ public interface IWorkflowApiClient
     Task<WorkflowEditModel> AddStepAsync(WorkflowEditModel model, int position, CancellationToken ct = default);
     Task<WorkflowEditModel> TagAsync(string workflowId, CancellationToken ct = default);
     Task<ApiResult> UntagAsync(string workflowId, CancellationToken ct = default);
+    Task<ApiResult> SetWorkflowSharedAsync(string workflowId, bool shared, CancellationToken ct = default);
     Task<List<WorkflowCommonTarget>> GetMetagroupsAsync(CancellationToken ct = default);
     Task<List<AdeptUserEntry>> GetUsersAsync(CancellationToken ct = default);
 }

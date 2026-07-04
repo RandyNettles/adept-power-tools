@@ -16,7 +16,7 @@ public class WorkflowXmlReaderTests
   <ProjectName>TestProject</ProjectName>
   <DryRun>true</DryRun>
   <Workflows>
-    <Workflow Name=""Test WF"" Active=""true"">
+    <Workflow Name=""Test WF"" Active=""true"" Shared=""true"">
       <Memo>Test description</Memo>
       <TimeoutDays>5</TimeoutDays>
       <Steps>
@@ -50,6 +50,7 @@ public class WorkflowXmlReaderTests
             var wf = result.Workflows[0];
             Assert.Equal("Test WF", wf.Name);
             Assert.True(wf.Active);
+            Assert.True(wf.Shared);
             Assert.Equal("Test description", wf.Memo);
             Assert.Equal(5, wf.TimeoutDays);
             Assert.Equal(2, wf.Steps.Count);
@@ -75,10 +76,10 @@ public class WorkflowXmlReaderTests
     {
         var xml = @"<AdeptWorkflowConfig>
   <Workflows>
-    <Workflow Name=""WF1"" Active=""true"">
+    <Workflow Name=""WF1"" Active=""true"" Shared=""true"">
       <Steps><Step Name=""S1""><Trustees><Trustee Id=""u1"" Type=""User"" /></Trustees></Step></Steps>
     </Workflow>
-    <Workflow Name=""WF2"" Active=""false"">
+    <Workflow Name=""WF2"" Active=""false"" Shared=""false"">
       <Steps><Step Name=""S1""><Trustees><Trustee Id=""u2"" Type=""Email"" /></Trustees></Step></Steps>
     </Workflow>
   </Workflows>
@@ -93,8 +94,10 @@ public class WorkflowXmlReaderTests
             Assert.Equal(2, result.Workflows.Count);
             Assert.Equal("WF1", result.Workflows[0].Name);
             Assert.True(result.Workflows[0].Active);
+            Assert.True(result.Workflows[0].Shared);
             Assert.Equal("WF2", result.Workflows[1].Name);
             Assert.False(result.Workflows[1].Active);
+            Assert.False(result.Workflows[1].Shared);
         }
         finally
         {
@@ -113,6 +116,35 @@ public class WorkflowXmlReaderTests
             var result = _reader.Read(path);
 
             Assert.Empty(result.Workflows);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Read_StepAllowEmptyTrustees_ParsesAttribute()
+    {
+        var xml = @"<AdeptWorkflowConfig>
+  <Workflows>
+    <Workflow Name=""WF"" Active=""true"">
+      <Steps>
+        <Step Name=""Terminal"" AutoAdvance=""true"" AllowEmptyTrustees=""true"" />
+      </Steps>
+    </Workflow>
+  </Workflows>
+</AdeptWorkflowConfig>";
+
+        var path = WriteTempFile(xml);
+
+        try
+        {
+            var result = _reader.Read(path);
+
+            Assert.Single(result.Workflows);
+            Assert.Single(result.Workflows[0].Steps);
+            Assert.True(result.Workflows[0].Steps[0].AllowEmptyTrustees);
         }
         finally
         {

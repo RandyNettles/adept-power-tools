@@ -112,7 +112,7 @@ public class WorkflowValidatorTests
     }
 
     [Fact]
-    public void Validate_StepWithoutTrustees_ReturnsWarning()
+    public void Validate_StepWithoutTrustees_ReturnsError()
     {
         var workflows = new List<WorkflowInputModel>
         {
@@ -128,8 +128,29 @@ public class WorkflowValidatorTests
 
         var result = _validator.Validate(workflows);
 
-        Assert.True(result.IsValid); // Warnings don't block
-        Assert.Contains(result.Warnings, w => w.Message.Contains("no trustees"));
+        Assert.False(result.IsValid);
+        Assert.Contains(result.Errors, e => e.Field == "Trustees" && e.Message.Contains("at least one trustee"));
+    }
+
+    [Fact]
+    public void Validate_StepWithoutTrustees_AllowedByFlag_ReturnsWarning()
+    {
+        var workflows = new List<WorkflowInputModel>
+        {
+            new()
+            {
+                Name = "Test WF",
+                Steps = new List<WorkflowInputStep>
+                {
+                    new() { Name = "Step 1", AllowEmptyTrustees = true, Trustees = new List<WorkflowInputTrustee>() }
+                }
+            }
+        };
+
+        var result = _validator.Validate(workflows);
+
+        Assert.True(result.IsValid);
+        Assert.Contains(result.Warnings, w => w.Field == "Trustees" && w.Message.Contains("AllowEmptyTrustees"));
     }
 
     [Fact]

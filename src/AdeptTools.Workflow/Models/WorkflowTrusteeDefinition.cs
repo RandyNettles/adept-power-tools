@@ -6,4 +6,5 @@ public class WorkflowTrusteeDefinition
     public string StepId { get; set; } = string.Empty;
     public string TrusteeId { get; set; } = string.Empty;
     public WorkflowUserType Type { get; set; }
+    public int Flags { get; set; }
 }

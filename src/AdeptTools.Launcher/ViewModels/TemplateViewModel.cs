@@ -123,71 +123,81 @@ public partial class TemplateViewModel : ObservableObject
             wf.Cells[4, 1].Value = "Deadline (days):";
             wf.Cells[5, 1].Value = "Active:";
             wf.Cells[5, 2].Value = "true";
+            wf.Cells[6, 1].Value = "Shared:";
+            wf.Cells[6, 2].Value = "false";
 
-            // Instructions (row 6 — before the step table header, outside the data range)
-            wf.Cells[6, 1].Value = "Instructions: Each group of rows is a step. The first row starts a new step (fill in Step Name). " +
+            // Instructions (row 7 — before the step table header, outside the data range)
+            wf.Cells[7, 1].Value = "Instructions: Each group of rows is a step. The first row starts a new step (fill in Step Name). " +
                 "Continuation rows (blank Step Name) add trustees to the previous step.";
 
-            // Step table headers at row 7 — vertical layout (6 columns)
-            wf.Cells[7, 1].Value = "Step Name";
-            wf.Cells[7, 2].Value = "Approvals Required";
-            wf.Cells[7, 3].Value = "Auto Advance";
-            wf.Cells[7, 4].Value = "Trustee";
-            wf.Cells[7, 5].Value = "Type";
-            wf.Cells[7, 6].Value = "Role";
+            // Step table headers at row 8 — vertical layout
+            wf.Cells[8, 1].Value = "Step Name";
+            wf.Cells[8, 2].Value = "Approvals Required";
+            wf.Cells[8, 3].Value = "Auto Advance";
+            wf.Cells[8, 4].Value = "Allow Empty Trustees";
+            wf.Cells[8, 5].Value = "Trustee";
+            wf.Cells[8, 6].Value = "Type";
+            wf.Cells[8, 7].Value = "Role";
 
             // Example: Step 1 with multiple trustees (vertical rows)
-            wf.Cells[8, 1].Value = "Draft";
-            wf.Cells[8, 2].Value = 0;
-            wf.Cells[8, 3].Value = "false";
-            wf.Cells[8, 4].Value = "jsmith";
-            wf.Cells[8, 5].Value = "User";
-            wf.Cells[8, 6].Value = "Reviewer";
+            wf.Cells[9, 1].Value = "Draft";
+            wf.Cells[9, 2].Value = 0;
+            wf.Cells[9, 3].Value = "false";
+            wf.Cells[9, 4].Value = "false";
+            wf.Cells[9, 5].Value = "jsmith";
+            wf.Cells[9, 6].Value = "User";
+            wf.Cells[9, 7].Value = "Reviewer";
             // Continuation row (same step, additional trustee)
-            wf.Cells[9, 4].Value = "eng-managers";
-            wf.Cells[9, 5].Value = "Group";
-            wf.Cells[9, 6].Value = "Notify";
+            wf.Cells[10, 5].Value = "eng-managers";
+            wf.Cells[10, 6].Value = "Group";
+            wf.Cells[10, 7].Value = "Notify";
 
             // Example: Step 2 with trustees
-            wf.Cells[10, 1].Value = "Review";
-            wf.Cells[10, 2].Value = 2;
-            wf.Cells[10, 3].Value = "true";
-            wf.Cells[10, 4].Value = "mjones";
-            wf.Cells[10, 5].Value = "User";
-            wf.Cells[10, 6].Value = "Reviewer";
-            wf.Cells[11, 4].Value = "akhan";
-            wf.Cells[11, 5].Value = "User";
-            wf.Cells[11, 6].Value = "Reviewer";
-            wf.Cells[11, 4].Value = "pm-notify";
-            wf.Cells[11, 5].Value = "Group";
-            wf.Cells[11, 6].Value = "Alert";
+            wf.Cells[11, 1].Value = "Review";
+            wf.Cells[11, 2].Value = 2;
+            wf.Cells[11, 3].Value = "true";
+            wf.Cells[11, 4].Value = "false";
+            wf.Cells[11, 5].Value = "mjones";
+            wf.Cells[11, 6].Value = "User";
+            wf.Cells[11, 7].Value = "Reviewer";
+            wf.Cells[12, 5].Value = "akhan";
+            wf.Cells[12, 6].Value = "User";
+            wf.Cells[12, 7].Value = "Reviewer";
+            wf.Cells[13, 5].Value = "pm-notify";
+            wf.Cells[13, 6].Value = "Group";
+            wf.Cells[13, 7].Value = "Alert";
 
             // Example: Terminal step with no trustees
-            wf.Cells[12, 1].Value = "Approved";
-            wf.Cells[12, 2].Value = 0;
-            wf.Cells[12, 3].Value = "false";
+            wf.Cells[14, 1].Value = "Approved";
+            wf.Cells[14, 2].Value = 0;
+            wf.Cells[14, 3].Value = "false";
+            wf.Cells[14, 4].Value = "true";
 
             // Data validation: Type dropdown
-            var typeValidation = wf.DataValidations.AddListValidation("E8:E100");
+            var typeValidation = wf.DataValidations.AddListValidation("F9:F100");
             typeValidation.Formula.Values.Add("User");
             typeValidation.Formula.Values.Add("Group");
             typeValidation.Formula.Values.Add("Meta");
             typeValidation.Formula.Values.Add("Email");
 
             // Data validation: Role dropdown
-            var roleValidation = wf.DataValidations.AddListValidation("F8:F100");
+            var roleValidation = wf.DataValidations.AddListValidation("G9:G100");
             roleValidation.Formula.Values.Add("Reviewer");
             roleValidation.Formula.Values.Add("Notify");
             roleValidation.Formula.Values.Add("Alert");
 
             // Formatting
-            using (var range = wf.Cells[7, 1, 7, 6])
+            using (var range = wf.Cells[8, 1, 8, 7])
             {
                 range.Style.Font.Bold = true;
             }
             wf.Column(1).Width = 20;
             wf.Column(2).Width = 20;
             wf.Column(3).Width = 14;
+            wf.Column(4).Width = 22;
+            wf.Column(5).Width = 24;
+            wf.Column(6).Width = 14;
+            wf.Column(7).Width = 14;
             wf.Column(4).Width = 20;
             wf.Column(5).Width = 10;
             wf.Column(6).Width = 12;

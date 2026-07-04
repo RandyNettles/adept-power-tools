@@ -45,15 +45,17 @@ public class WorkflowExcelReader
         {
             Name = workflowName,
             Memo = GetCellText(sheet, 3, 2),
-            Active = ParseBool(GetCellText(sheet, 5, 2), defaultValue: true)
+            Active = ParseBool(GetCellText(sheet, 5, 2), defaultValue: true),
+            Shared = ParseBool(GetCellText(sheet, 6, 2), defaultValue: false)
         };
 
         var deadlineDaysText = GetCellText(sheet, 4, 2);
         if (int.TryParse(deadlineDaysText, out var deadlineDays))
             model.TimeoutDays = deadlineDays;
 
-        // Read step headers at row 7
-        var headerRow = 7;
+        // Locate step table headers dynamically so templates can move the
+        // instruction row without breaking step parsing.
+        var headerRow = FindStepHeaderRow(sheet);
         var headers = ReadHeaders(sheet, headerRow);
 
         if (headers.Count == 0)
@@ -63,6 +65,7 @@ public class WorkflowExcelReader
         int stepNameCol = FindColumn(headers, "Step Name");
         int approvalsCol = FindColumn(headers, "Approvals Required");
         int autoAdvanceCol = FindColumn(headers, "Auto Advance");
+        int allowEmptyTrusteesCol = FindColumn(headers, "Allow Empty Trustees");
         int trusteeCol = FindColumn(headers, "Trustee");
         int typeCol = FindColumn(headers, "Type");
         int roleCol = FindColumn(headers, "Role");
@@ -71,6 +74,8 @@ public class WorkflowExcelReader
         // A new step begins when the Step Name cell is non-empty.
         // Subsequent rows with empty Step Name belong to the preceding step (trustee rows).
         WorkflowInputStep? currentStep = null;
+        string currentTypeText = string.Empty;
+        string currentRoleText = string.Empty;
         var dataStart = headerRow + 1;
         var lastRow = sheet.Dimension?.End.Row ?? dataStart;
 
@@ -86,6 +91,9 @@ public class WorkflowExcelReader
                     Name = stepNameText
                 };
 
+                currentTypeText = string.Empty;
+                currentRoleText = string.Empty;
+
                 if (approvalsCol >= 0)
                 {
                     var approvalsText = GetCellText(sheet, row, approvalsCol);
@@ -96,6 +104,11 @@ public class WorkflowExcelReader
                 if (autoAdvanceCol >= 0)
                 {
                     currentStep.AutoAdvance = ParseBool(GetCellText(sheet, row, autoAdvanceCol), defaultValue: false);
+                }
+
+                if (allowEmptyTrusteesCol >= 0)
+                {
+                    currentStep.AllowEmptyTrustees = ParseBool(GetCellText(sheet, row, allowEmptyTrusteesCol), defaultValue: false);
                 }
 
                 model.Steps.Add(currentStep);
@@ -112,16 +125,29 @@ public class WorkflowExcelReader
             if (string.IsNullOrWhiteSpace(trusteeValue))
                 continue;
 
-            var typeText = typeCol >= 0 ? GetCellText(sheet, row, typeCol) : string.Empty;
-            var roleText = roleCol >= 0 ? GetCellText(sheet, row, roleCol) : string.Empty;
+            var rowTypeText = typeCol >= 0 ? GetCellText(sheet, row, typeCol) : string.Empty;
+            var rowRoleText = roleCol >= 0 ? GetCellText(sheet, row, roleCol) : string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(rowTypeText))
+                currentTypeText = rowTypeText;
+            if (!string.IsNullOrWhiteSpace(rowRoleText))
+                currentRoleText = rowRoleText;
+
+            // Continuation rows often omit Type/Role. Carry values forward within the step.
+            // If Type is still missing, default to User instead of silently dropping trustees.
+            var effectiveTypeText = !string.IsNullOrWhiteSpace(rowTypeText) ? rowTypeText : currentTypeText;
+            if (string.IsNullOrWhiteSpace(effectiveTypeText))
+                effectiveTypeText = "User";
+
+            var effectiveRoleText = !string.IsNullOrWhiteSpace(rowRoleText) ? rowRoleText : currentRoleText;
 
             // Comma-delimited split
             var trusteeIds = TrusteeParser.Split(trusteeValue);
             foreach (var id in trusteeIds)
             {
-                if (TrusteeTypeMapper.TryMap(typeText, out var trusteeType))
+                if (TrusteeTypeMapper.TryMap(effectiveTypeText, out var trusteeType))
                 {
-                    TrusteeTypeMapper.TryMapRole(roleText, out var role);
+                    TrusteeTypeMapper.TryMapRole(effectiveRoleText, out var role);
 
                     currentStep.Trustees.Add(new WorkflowInputTrustee
                     {
@@ -134,6 +160,22 @@ public class WorkflowExcelReader
         }
 
         return model;
+    }
+
+    private static int FindStepHeaderRow(ExcelWorksheet sheet)
+    {
+        // Historical templates used row 7; newer templates can shift the table
+        // down by one row. Scan a safe top range for "Step Name".
+        var maxRow = Math.Min(sheet.Dimension?.End.Row ?? 20, 20);
+        for (int row = 1; row <= maxRow; row++)
+        {
+            var firstCol = GetCellText(sheet, row, 1);
+            if (string.Equals(firstCol, "Step Name", StringComparison.OrdinalIgnoreCase))
+                return row;
+        }
+
+        // Backward-compatible fallback.
+        return 7;
     }
 
     private static Dictionary<int, string> ReadHeaders(ExcelWorksheet sheet, int row)

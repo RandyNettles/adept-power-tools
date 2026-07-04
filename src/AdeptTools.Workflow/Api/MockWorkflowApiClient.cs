@@ -6,6 +6,8 @@ namespace AdeptTools.Workflow.Api;
 
 public class MockWorkflowApiClient : IWorkflowApiClient
 {
+    private readonly Dictionary<string, WorkflowEditModel> _savedWorkflows = new(StringComparer.OrdinalIgnoreCase);
+
     public virtual Task<WorkflowSetup> GetSetupAsync(CancellationToken ct = default)
     {
         return Task.FromResult(new WorkflowSetup
@@ -84,6 +86,11 @@ public class MockWorkflowApiClient : IWorkflowApiClient
 
     public virtual Task<WorkflowEditModel> GetWorkflowAsync(string workflowId, CancellationToken ct = default)
     {
+        if (_savedWorkflows.TryGetValue(workflowId, out var saved))
+        {
+            return Task.FromResult(saved);
+        }
+
         return Task.FromResult(new WorkflowEditModel
         {
             BEditable = true,
@@ -110,6 +117,11 @@ public class MockWorkflowApiClient : IWorkflowApiClient
 
     public virtual Task<ApiResult> SaveWorkflowAsync(WorkflowEditModel model, CancellationToken ct = default)
     {
+        if (!string.IsNullOrWhiteSpace(model.WorkflowDefinition.WorkflowId))
+        {
+            _savedWorkflows[model.WorkflowDefinition.WorkflowId] = model;
+        }
+
         return Task.FromResult(ApiResult.Success("Workflow saved (mock)."));
     }
 
@@ -189,6 +201,11 @@ public class MockWorkflowApiClient : IWorkflowApiClient
     public virtual Task<ApiResult> UntagAsync(string workflowId, CancellationToken ct = default)
     {
         return Task.FromResult(ApiResult.Success());
+    }
+
+    public virtual Task<ApiResult> SetWorkflowSharedAsync(string workflowId, bool shared, CancellationToken ct = default)
+    {
+        return Task.FromResult(ApiResult.Success("Workflow share state updated (mock)."));
     }
 
     public virtual Task<List<WorkflowCommonTarget>> GetMetagroupsAsync(CancellationToken ct = default)

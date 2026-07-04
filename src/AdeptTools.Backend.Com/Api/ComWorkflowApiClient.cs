@@ -102,6 +102,9 @@ public class ComWorkflowApiClient : IWorkflowApiClient
                 Edit = InvokeGetBool(wfInfo, "CanEdit"),
                 Share = InvokeGetBool(wfInfo, "CanShare"),
                 Delete = InvokeGetBool(wfInfo, "CanDelete"),
+                ShareStatus = NormalizeOptionalString(TryGetString(wfInfo, "ShareStatus")),
+                OwnerUserId = NormalizeOptionalString(TryGetString(wfInfo, "OwnerUserId")),
+                OwnerDisplayName = NormalizeOptionalString(TryGetString(wfInfo, "OwnerDisplayName")),
                 LockedByDisplayName = NormalizeOptionalString(InvokeGetString(wfInfo, "LockedByDisplayName"))
             });
             ReleaseCom(ref wfInfo);
@@ -414,7 +417,7 @@ public class ComWorkflowApiClient : IWorkflowApiClient
             // Apply workflow-level properties
             InvokeSet(nxWf, "Name", model.WorkflowDefinition.Name);
             InvokeSet(nxWf, "Memo", model.WorkflowDefinition.Memo ?? string.Empty);
-            InvokeSet(nxWf, "Active", true);
+            InvokeSet(nxWf, "Active", model.WorkflowDefinition.Active);
             InvokeSet(nxWf, "DoEmailNotify", model.WorkflowDefinition.BDoEmailNotify);
             InvokeSet(nxWf, "TimeoutOn", model.WorkflowDefinition.BTimeoutOn);
             InvokeSet(nxWf, "RecurringTimeoutOn", model.WorkflowDefinition.BRecurringTimeoutOn);
@@ -422,6 +425,7 @@ public class ComWorkflowApiClient : IWorkflowApiClient
             InvokeSet(nxWf, "RecurringTimeout", model.WorkflowDefinition.RecurringTimeout ?? string.Empty);
             InvokeSet(nxWf, "TimeoutIncludeSaturday", model.WorkflowDefinition.BTimeoutIncludeSaturday);
             InvokeSet(nxWf, "TimeoutIncludeSunday", model.WorkflowDefinition.BTimeoutIncludeSunday);
+            TrySetProperty(nxWf, "Shared", model.WorkflowDefinition.Shared);
 
             // Apply step-level properties
             var stepCount = InvokeGetInt(nxWf, "StepCount");
@@ -506,6 +510,14 @@ public class ComWorkflowApiClient : IWorkflowApiClient
             : ApiResult.Failure(result, $"COM Untag failed with code {result}.");
     }
 
+    public Task<ApiResult> SetWorkflowSharedAsync(string workflowId, bool shared, CancellationToken ct = default)
+    {
+        EnsureWorkflowEnabled();
+        return Task.FromResult(ApiResult.Failure(
+            -1,
+            "Setting workflow share state is not supported via COM backend in this client. Use HTTP backend for Shared workflow operations."));
+    }
+
     public async Task<List<WorkflowCommonTarget>> GetMetagroupsAsync(CancellationToken ct = default)
     {
         EnsureWorkflowEnabled();
@@ -545,6 +557,10 @@ public class ComWorkflowApiClient : IWorkflowApiClient
             {
                 WorkflowId = InvokeGetString(nxWf, "WorkflowId"),
                 Name = InvokeGetString(nxWf, "Name"),
+                Active = InvokeGetBool(nxWf, "Active"),
+                Shared = TryGetBool(nxWf, "Shared") ?? false,
+                OwnerUserId = NormalizeOptionalString(TryGetString(nxWf, "OwnerUserId")),
+                OwnerDisplayName = NormalizeOptionalString(TryGetString(nxWf, "OwnerDisplayName")),
                 Memo = InvokeGetString(nxWf, "Memo"),
                 BDoEmailNotify = InvokeGetBool(nxWf, "DoEmailNotify"),
                 BTimeoutOn = InvokeGetBool(nxWf, "TimeoutOn"),
@@ -635,7 +651,65 @@ public class ComWorkflowApiClient : IWorkflowApiClient
         InvokeMethod(nxStep, "ClearTrustees");
         foreach (var trustee in stepModel.WorkflowTrusteeDefinitions)
         {
-            InvokeMethod(nxStep, "AddTrustee", trustee.TrusteeId, MapTrusteeTypeToString(trustee.Type));
+            AddStepTrustee(nxStep, trustee);
+        }
+    }
+
+    private static void AddStepTrustee(object nxStep, WorkflowTrusteeDefinition trustee)
+    {
+        var typeCode = MapTrusteeTypeToString(trustee.Type);
+        var typeChar = typeCode[0];
+        var typeInt = (int)typeChar;
+
+        // Legacy COM variants differ across versions (string/char/int trustee type).
+        if (TryInvokeMethod(nxStep, "AddTrustee", trustee.TrusteeId, typeCode)) return;
+        if (TryInvokeMethod(nxStep, "AddTrustee", trustee.TrusteeId, typeChar)) return;
+        if (TryInvokeMethod(nxStep, "AddTrustee", trustee.TrusteeId, typeInt)) return;
+
+        if (TryAddTrusteeViaList(nxStep, trustee.TrusteeId, typeCode, typeChar, typeInt)) return;
+
+        throw new InvalidOperationException(
+            $"Unable to add trustee '{trustee.TrusteeId}' with type '{typeCode}' via COM.");
+    }
+
+    private static bool TryAddTrusteeViaList(
+        object nxStep,
+        string trusteeId,
+        string typeCode,
+        char typeChar,
+        int typeInt)
+    {
+        object? trusteeList = null;
+        object? trusteeDef = null;
+
+        try
+        {
+            trusteeList = TryGetProperty(nxStep, "WorkflowTrusteeDefList")
+                          ?? TryGetProperty(nxStep, "TrusteeDefList")
+                          ?? TryGetProperty(nxStep, "TrusteeList")
+                          ?? TryInvoke(nxStep, "GetWorkflowTrusteeDefList")
+                          ?? TryInvoke(nxStep, "GetTrusteeList");
+
+            if (trusteeList is null)
+                return false;
+
+            if (TryInvokeMethod(trusteeList, "Add", trusteeId, typeCode)) return true;
+            if (TryInvokeMethod(trusteeList, "Add", trusteeId, typeChar)) return true;
+            if (TryInvokeMethod(trusteeList, "Add", trusteeId, typeInt)) return true;
+
+            trusteeDef = TryInvoke(trusteeList, "FindId", trusteeId);
+            if (trusteeDef is null)
+                return false;
+
+            if (TrySetProperty(trusteeDef, "IdType", typeInt)) return true;
+            if (TrySetProperty(trusteeDef, "Type", typeCode)) return true;
+
+            return false;
+        }
+        finally
+        {
+            ReleaseCom(ref trusteeDef);
+            ReleaseCom(ref trusteeList);
         }
     }
 
@@ -847,6 +921,24 @@ public class ComWorkflowApiClient : IWorkflowApiClient
         }
     }
 
+    private static bool TrySetProperty(object target, string name, object? value)
+    {
+        try
+        {
+            target.GetType().InvokeMember(
+                name,
+                BindingFlags.SetProperty | BindingFlags.IgnoreCase,
+                null,
+                target,
+                new[] { value });
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static nint GetIdentityKey(object value)
     {
         try
@@ -887,6 +979,24 @@ public class ComWorkflowApiClient : IWorkflowApiClient
         catch
         {
             return null;
+        }
+    }
+
+    private static bool TryInvokeMethod(object target, string name, params object[] args)
+    {
+        try
+        {
+            target.GetType().InvokeMember(
+                name,
+                BindingFlags.InvokeMethod | BindingFlags.IgnoreCase,
+                null,
+                target,
+                args);
+            return true;
+        }
+        catch
+        {
+            return false;
         }
     }
 

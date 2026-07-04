@@ -14,7 +14,10 @@ public class HttpWorkflowApiClient : IWorkflowApiClient
 {
     private readonly HttpClient _httpClient;
     private readonly IAdeptAuthService? _authService;
-    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true
+    };
 
     public HttpWorkflowApiClient(HttpClient httpClient, IAdeptAuthService? authService = null)
     {
@@ -102,6 +105,48 @@ public class HttpWorkflowApiClient : IWorkflowApiClient
         var response = await GetAsyncWithAuthRefreshAsync(endpoint, ct);
         await EnsureSuccessOrThrowAsync(response, endpoint, ct);
         return await response.Content.ReadFromJsonAsync<ApiResult>(JsonOptions, ct) ?? new ApiResult();
+    }
+
+    public async Task<ApiResult> SetWorkflowSharedAsync(string workflowId, bool shared, CancellationToken ct = default)
+    {
+        var workflows = await GetWorkflowsAsync(ct);
+        var item = workflows.Workflows.FirstOrDefault(w =>
+            string.Equals(w.WorkflowId, workflowId, StringComparison.OrdinalIgnoreCase));
+
+        if (item is null)
+        {
+            return ApiResult.Failure(-1, $"Workflow '{workflowId}' was not found while applying share state.");
+        }
+
+        if (string.IsNullOrWhiteSpace(item.ContainerId))
+        {
+            return ApiResult.Failure(-1, $"Workflow '{workflowId}' has no containerId; cannot apply share state.");
+        }
+
+        if (shared)
+        {
+            var getShareEndpoint = $"api/shares/share/9/{item.ContainerId}";
+            var getShareResponse = await GetAsyncWithAuthRefreshAsync(getShareEndpoint, ct);
+            await EnsureSuccessOrThrowAsync(getShareResponse, getShareEndpoint, ct);
+
+            var packet = await getShareResponse.Content.ReadFromJsonAsync<WorkflowSharePacket>(JsonOptions, ct)
+                ?? new WorkflowSharePacket();
+            packet.BIsGlobal = true;
+            packet.ShareModelList ??= new List<WorkflowShareModel>();
+
+            var setShareEndpoint = $"api/shares/share/9/{item.ContainerId}";
+            var payload = JsonSerializer.Serialize(packet, JsonOptions);
+            var setShareResponse = await PostJsonWithAuthRefreshAsync(setShareEndpoint, payload, ct);
+            await EnsureSuccessOrThrowAsync(setShareResponse, setShareEndpoint, ct);
+            return await setShareResponse.Content.ReadFromJsonAsync<ApiResult>(JsonOptions, ct) ?? ApiResult.Success();
+        }
+        else
+        {
+            var unshareEndpoint = $"api/shares/unshare/9/{item.ContainerId}";
+            var unshareResponse = await PostJsonWithAuthRefreshAsync(unshareEndpoint, "null", ct);
+            await EnsureSuccessOrThrowAsync(unshareResponse, unshareEndpoint, ct);
+            return await unshareResponse.Content.ReadFromJsonAsync<ApiResult>(JsonOptions, ct) ?? ApiResult.Success();
+        }
     }
 
     public async Task<List<WorkflowCommonTarget>> GetMetagroupsAsync(CancellationToken ct = default)
@@ -383,6 +428,16 @@ public class HttpWorkflowApiClient : IWorkflowApiClient
     {
         public string? LoginName { get; set; }
         public string? UserName { get; set; }
+    }
+
+    private sealed class WorkflowSharePacket
+    {
+        public bool BIsGlobal { get; set; }
+        public List<WorkflowShareModel>? ShareModelList { get; set; }
+    }
+
+    private sealed class WorkflowShareModel
+    {
     }
 
     private async Task EnsureSuccessOrThrowAsync(HttpResponseMessage response, string endpoint, CancellationToken ct)

@@ -50,6 +50,7 @@ public class WorkflowXmlReader
             {
                 Name = wfElement.GetAttribute("Name"),
                 Active = ParseBoolAttr(wfElement, "Active", true),
+                Shared = ParseBoolAttr(wfElement, "Shared", false),
                 Memo = GetChildText(wfElement, "Memo"),
                 ExcludeSaturday = ParseBoolAttr(wfElement, "ExcludeSaturday", false),
                 ExcludeSunday = ParseBoolAttr(wfElement, "ExcludeSunday", false)
@@ -73,7 +74,8 @@ public class WorkflowXmlReader
                     var step = new WorkflowInputStep
                     {
                         Name = stepElement.GetAttribute("Name"),
-                        AutoAdvance = ParseBoolAttr(stepElement, "AutoAdvance", false)
+                        AutoAdvance = ParseBoolAttr(stepElement, "AutoAdvance", false),
+                        AllowEmptyTrustees = ParseBoolAttr(stepElement, "AllowEmptyTrustees", false)
                     };
 
                     var approvalsAttr = stepElement.GetAttribute("ApprovalsRequired");

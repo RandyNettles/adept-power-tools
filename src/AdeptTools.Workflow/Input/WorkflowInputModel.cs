@@ -13,6 +13,7 @@ public class WorkflowInputModel
 {
     public string Name { get; set; } = string.Empty;
     public bool Active { get; set; } = true;
+    public bool Shared { get; set; }
     public string? Memo { get; set; }
     public int? TimeoutDays { get; set; }
     public int? RecurringTimeoutDays { get; set; }
@@ -26,6 +27,7 @@ public class WorkflowInputStep
     public string Name { get; set; } = string.Empty;
     public int RequiredApprovalsCount { get; set; }
     public bool AutoAdvance { get; set; }
+    public bool AllowEmptyTrustees { get; set; }
     public List<WorkflowInputTrustee> Trustees { get; set; } = new();
 }
 

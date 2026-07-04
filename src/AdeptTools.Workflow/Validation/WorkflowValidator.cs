@@ -137,15 +137,29 @@ public class WorkflowValidator
                 });
             }
 
-            if (step.Trustees.Count == 0)
+            var trusteeCount = step.Trustees.Count;
+            if (trusteeCount == 0)
             {
-                result.Warnings.Add(new ValidationWarning
+                if (step.AllowEmptyTrustees)
                 {
-                    WorkflowName = wf.Name,
-                    StepName = step.Name,
-                    Field = "Trustees",
-                    Message = "Step has no trustees assigned."
-                });
+                    result.Warnings.Add(new ValidationWarning
+                    {
+                        WorkflowName = wf.Name,
+                        StepName = step.Name,
+                        Field = "Trustees",
+                        Message = "Step has no trustees, but AllowEmptyTrustees is enabled."
+                    });
+                }
+                else
+                {
+                    result.Errors.Add(new ValidationError
+                    {
+                        WorkflowName = wf.Name,
+                        StepName = step.Name,
+                        Field = "Trustees",
+                        Message = "Step must have at least one trustee unless AllowEmptyTrustees is true."
+                    });
+                }
             }
         }
     }

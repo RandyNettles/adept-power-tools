@@ -54,10 +54,10 @@ public static class WorkflowCommands
             }
             else if (format == "csv")
             {
-                Console.WriteLine("Name,Active,Steps,InProcess,LockedBy");
+                Console.WriteLine("Name,Active,Steps,Trustees,Reviewers,Notify,Alerts,InProcess,LockedBy");
                 foreach (var wf in result.Workflows)
                 {
-                    Console.WriteLine($"\"{wf.WorkflowName}\",{wf.Active},{wf.StepCount},{wf.InProcessCount},\"{wf.LockedByDisplayName ?? ""}\"");
+                    Console.WriteLine($"\"{wf.WorkflowName}\",{wf.Active},{wf.StepCount},{wf.TrusteeCount},{wf.ReviewerCount},{wf.NotifyCount},{wf.AlertCount},{wf.InProcessCount},\"{wf.LockedByDisplayName ?? ""}\"");
                 }
             }
             else
@@ -67,14 +67,14 @@ public static class WorkflowCommands
                 if (!string.IsNullOrWhiteSpace(result.AppliedFilter))
                     Console.WriteLine($"  Filter: {result.AppliedFilter}");
 
-                Console.WriteLine($"  {"Name",-30} {"Active",-8} {"Steps",-7} {"In-Process",-12} {"Locked By",-15}");
-                Console.WriteLine($"  {new string('─', 30)} {new string('─', 8)} {new string('─', 7)} {new string('─', 12)} {new string('─', 15)}");
+                Console.WriteLine($"  {"Name",-30} {"Active",-8} {"Steps",-7} {"Trustees",-10} {"Review",-7} {"Notify",-7} {"Alert",-7} {"In-Process",-12} {"Locked By",-15}");
+                Console.WriteLine($"  {new string('─', 30)} {new string('─', 8)} {new string('─', 7)} {new string('─', 10)} {new string('─', 7)} {new string('─', 7)} {new string('─', 7)} {new string('─', 12)} {new string('─', 15)}");
 
                 foreach (var wf in result.Workflows)
                 {
                     var active = wf.Active ? "✓" : "✗";
                     var locked = wf.LockedByDisplayName ?? "";
-                    Console.WriteLine($"  {wf.WorkflowName,-30} {active,-8} {wf.StepCount,-7} {wf.InProcessCount,-12} {locked,-15}");
+                    Console.WriteLine($"  {wf.WorkflowName,-30} {active,-8} {wf.StepCount,-7} {wf.TrusteeCount,-10} {wf.ReviewerCount,-7} {wf.NotifyCount,-7} {wf.AlertCount,-7} {wf.InProcessCount,-12} {locked,-15}");
                 }
 
                 Console.WriteLine();
@@ -153,7 +153,7 @@ public static class WorkflowCommands
 
             Console.WriteLine();
             Console.WriteLine($"  Summary: {result.Total} total, {result.Succeeded} succeeded, {result.Failed} failed, {result.Skipped} skipped");
-            WriteDetailedOperationResults(result);
+            WriteDetailedOperationResults(result, includeSuccess: true);
 
             context.ExitCode = result.Failed > 0 ? 1 : 0;
         });
@@ -372,12 +372,12 @@ public static class WorkflowCommands
         return null;
     }
 
-    private static void WriteDetailedOperationResults(WorkflowBatchResult result)
+    private static void WriteDetailedOperationResults(WorkflowBatchResult result, bool includeSuccess = false)
     {
         if (result.Results.Count == 0)
             return;
 
-        var shouldPrint = result.Results.Any(r => r.Status != WorkflowResultStatus.Success);
+        var shouldPrint = includeSuccess || result.Results.Any(r => r.Status != WorkflowResultStatus.Success);
         if (!shouldPrint)
             return;
 

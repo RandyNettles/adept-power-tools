@@ -135,6 +135,8 @@ public class WorkflowService : IWorkflowService
 
             // 3. Set workflow-level properties (after all re-reads)
             model.WorkflowDefinition.Name = input.Name;
+            model.WorkflowDefinition.Active = input.Active;
+            model.WorkflowDefinition.Shared = input.Shared;
             model.WorkflowDefinition.Memo = input.Memo;
 
             if (input.TimeoutDays.HasValue)
@@ -155,7 +157,17 @@ public class WorkflowService : IWorkflowService
             // 4. Configure all steps (after final model is stable)
             for (int s = 0; s < input.Steps.Count && s < model.WorkflowStepModels.Count; s++)
             {
-                ConfigureStep(model.WorkflowStepModels[s], input.Steps[s], workflowId);
+                var notificationValidationError = ConfigureStep(model.WorkflowStepModels[s], input.Steps[s], workflowId);
+                if (!string.IsNullOrWhiteSpace(notificationValidationError))
+                {
+                    await TryUntagAsync(workflowId, ct);
+                    return new WorkflowOperationResult
+                    {
+                        WorkflowName = input.Name,
+                        Status = WorkflowResultStatus.Fail,
+                        Message = notificationValidationError
+                    };
+                }
             }
 
             // Enable workflow-level email notify if any step has notification trustees
@@ -177,15 +189,52 @@ public class WorkflowService : IWorkflowService
                 };
             }
 
+            var shareResult = await _apiClient.SetWorkflowSharedAsync(workflowId, input.Shared, ct);
+            if (!shareResult.IsSuccess)
+            {
+                await TryUntagAsync(workflowId, ct);
+                return new WorkflowOperationResult
+                {
+                    WorkflowName = input.Name,
+                    Status = WorkflowResultStatus.Fail,
+                    Message = shareResult.ErrorMessage ?? "Failed to apply workflow share state."
+                };
+            }
+
+            // Guard: fail creation if reviewer trustees were dropped during persistence.
+            var trusteePersistenceError = await ValidateReviewerTrusteePersistenceAsync(input, workflowId, ct);
+            if (!string.IsNullOrWhiteSpace(trusteePersistenceError))
+            {
+                await TryUntagAsync(workflowId, ct);
+                return new WorkflowOperationResult
+                {
+                    WorkflowName = input.Name,
+                    Status = WorkflowResultStatus.Fail,
+                    Message = trusteePersistenceError
+                };
+            }
+
             // 6. Untag
             await _apiClient.UntagAsync(workflowId, ct);
 
+            // 7. Post-save visibility check (same auth/context as this create call)
+            var (visibleToCurrentContext, ownerDisplay, ownerUserId, shareStatus) =
+                await CheckWorkflowVisibilityAsync(workflowId, input.Name, ct);
+
             var totalTrustees = input.Steps.Sum(s => s.Trustees.Count);
+            var ownership = string.IsNullOrWhiteSpace(ownerDisplay)
+                ? (string.IsNullOrWhiteSpace(ownerUserId) ? "unknown" : ownerUserId)
+                : ownerDisplay;
+            var sharedText = input.Shared ? "shared" : "not-shared";
+            var visibilityWarning = visibleToCurrentContext
+                ? string.Empty
+                : " WARNING: workflow was saved but is not visible in current list context.";
+
             return new WorkflowOperationResult
             {
                 WorkflowName = input.Name,
                 Status = WorkflowResultStatus.Success,
-                Message = $"Created ({input.Steps.Count} steps, {totalTrustees} trustees)",
+                Message = $"Created ({input.Steps.Count} steps, {totalTrustees} trustees, owner: {ownership}, shared: {sharedText}, share-status: {shareStatus ?? "unknown"}).{visibilityWarning}",
                 StepCount = input.Steps.Count,
                 TrusteeCount = totalTrustees
             };
@@ -325,6 +374,8 @@ public class WorkflowService : IWorkflowService
             }
 
             // Apply workflow-level properties (after AddStepAsync re-reads)
+            model.WorkflowDefinition.Active = input.Active;
+            model.WorkflowDefinition.Shared = input.Shared;
             model.WorkflowDefinition.Memo = input.Memo;
 
             if (input.TimeoutDays.HasValue)
@@ -345,7 +396,17 @@ public class WorkflowService : IWorkflowService
             // Configure all steps (after final model is stable)
             for (int s = 0; s < input.Steps.Count && s < model.WorkflowStepModels.Count; s++)
             {
-                ConfigureStep(model.WorkflowStepModels[s], input.Steps[s], workflowId);
+                var notificationValidationError = ConfigureStep(model.WorkflowStepModels[s], input.Steps[s], workflowId);
+                if (!string.IsNullOrWhiteSpace(notificationValidationError))
+                {
+                    await _apiClient.UntagAsync(workflowId, ct);
+                    return new WorkflowOperationResult
+                    {
+                        WorkflowName = input.Name,
+                        Status = WorkflowResultStatus.Fail,
+                        Message = notificationValidationError
+                    };
+                }
             }
 
             // Enable workflow-level email notify if any step has notification trustees
@@ -356,15 +417,27 @@ public class WorkflowService : IWorkflowService
 
             // Save
             var saveResult = await _apiClient.SaveWorkflowAsync(model, ct);
-            await _apiClient.UntagAsync(workflowId, ct);
-
             if (!saveResult.IsSuccess)
             {
+                await _apiClient.UntagAsync(workflowId, ct);
                 return new WorkflowOperationResult
                 {
                     WorkflowName = input.Name,
                     Status = WorkflowResultStatus.Fail,
                     Message = saveResult.ErrorMessage ?? "Save failed."
+                };
+            }
+
+            var shareResult = await _apiClient.SetWorkflowSharedAsync(workflowId, input.Shared, ct);
+            await _apiClient.UntagAsync(workflowId, ct);
+
+            if (!shareResult.IsSuccess)
+            {
+                return new WorkflowOperationResult
+                {
+                    WorkflowName = input.Name,
+                    Status = WorkflowResultStatus.Fail,
+                    Message = shareResult.ErrorMessage ?? "Failed to apply workflow share state."
                 };
             }
 
@@ -543,6 +616,36 @@ public class WorkflowService : IWorkflowService
         var packet = await _apiClient.GetWorkflowsAsync(ct);
         var workflows = packet.Workflows;
 
+        // Enrich list items with trustee counts for CLI reporting.
+        foreach (var wf in workflows)
+        {
+            try
+            {
+                var detail = await _apiClient.GetWorkflowAsync(wf.WorkflowId, ct);
+                wf.ReviewerCount = detail.WorkflowStepModels
+                    .Where(s => !s.BDeleted)
+                    .Sum(s => s.WorkflowTrusteeDefinitions?.Count ?? 0);
+
+                wf.NotifyCount = detail.WorkflowStepModels
+                    .Where(s => !s.BDeleted)
+                    .Sum(s => s.EmailNotificationList?.Count ?? 0);
+
+                wf.AlertCount = detail.WorkflowStepModels
+                    .Where(s => !s.BDeleted)
+                    .Sum(s => s.AlertNotificationList?.Count ?? 0);
+
+                wf.TrusteeCount = wf.ReviewerCount + wf.NotifyCount + wf.AlertCount;
+            }
+            catch
+            {
+                // Best effort: keep list responsive even if a detail call fails.
+                wf.TrusteeCount = 0;
+                wf.ReviewerCount = 0;
+                wf.NotifyCount = 0;
+                wf.AlertCount = 0;
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(request.Filter))
         {
             var pattern = GlobToRegex(request.Filter);
@@ -573,7 +676,7 @@ public class WorkflowService : IWorkflowService
         };
     }
 
-    private static void ConfigureStep(WorkflowStepModel stepModel, WorkflowInputStep input, string workflowId)
+    private static string? ConfigureStep(WorkflowStepModel stepModel, WorkflowInputStep input, string workflowId)
     {
         stepModel.WorkflowStepDefinition.Name = input.Name;
         stepModel.WorkflowStepDefinition.RequiredApprovalsCount = input.RequiredApprovalsCount;
@@ -594,27 +697,80 @@ public class WorkflowService : IWorkflowService
             Type = t.TrusteeType
         }).ToList();
 
-        stepModel.EmailNotificationList = emailNotify.Select(t => new WorkflowNotificationDefinition
-        {
-            WorkflowId = workflowId,
-            StepId = stepId,
-            TrusteeId = t.TrusteeId,
-            Type = t.TrusteeType
-        }).ToList();
+        stepModel.EmailNotificationList = BuildNotificationDefinitions(emailNotify, workflowId, stepId, out var invalidEmailNotifyCount);
+        stepModel.AlertNotificationList = BuildNotificationDefinitions(alertNotify, workflowId, stepId, out var invalidAlertNotifyCount);
 
-        stepModel.AlertNotificationList = alertNotify.Select(t => new WorkflowNotificationDefinition
+        var allNotifyInputCount = emailNotify.Count() + alertNotify.Count();
+        var validNotifyCount = stepModel.EmailNotificationList.Count + stepModel.AlertNotificationList.Count;
+        var invalidNotifyCount = invalidEmailNotifyCount + invalidAlertNotifyCount;
+        if (allNotifyInputCount > 0 && validNotifyCount == 0 && invalidNotifyCount > 0)
         {
-            WorkflowId = workflowId,
-            StepId = stepId,
-            TrusteeId = t.TrusteeId,
-            Type = t.TrusteeType
-        }).ToList();
+            return $"Step '{input.Name}': all notify/alert recipients are invalid. " +
+                   "Provide valid user/group/key/email recipients, or use Approvers.";
+        }
 
         // Enable email notify flag if notification trustees exist
         if (stepModel.EmailNotificationList.Count > 0 || stepModel.AlertNotificationList.Count > 0)
         {
             stepModel.WorkflowStepDefinition.BDoEmailNotify = true;
         }
+
+        return null;
+    }
+
+    private static string NormalizeNotificationTrusteeId(WorkflowInputTrustee trustee)
+    {
+        if (trustee.TrusteeType == WorkflowUserType.Approvers)
+            return WorkflowParticipantConstants.ApproversSentinelTargetId;
+
+        return trustee.TrusteeId?.Trim() ?? string.Empty;
+    }
+
+    private static List<WorkflowNotificationDefinition> BuildNotificationDefinitions(
+        IEnumerable<WorkflowInputTrustee> trustees,
+        string workflowId,
+        string stepId,
+        out int invalidCount)
+    {
+        invalidCount = 0;
+        var notifications = new List<WorkflowNotificationDefinition>();
+
+        foreach (var trustee in trustees)
+        {
+            var normalizedId = NormalizeNotificationTrusteeId(trustee);
+            if (!IsValidNotificationTrustee(trustee.TrusteeType, normalizedId))
+            {
+                invalidCount++;
+                continue;
+            }
+
+            notifications.Add(new WorkflowNotificationDefinition
+            {
+                WorkflowId = workflowId,
+                StepId = stepId,
+                TrusteeId = normalizedId,
+                Type = trustee.TrusteeType,
+                TargetId = normalizedId,
+                TargetType = trustee.TrusteeType,
+                Email = trustee.TrusteeType == WorkflowUserType.Email ? normalizedId : string.Empty
+            });
+        }
+
+        return notifications;
+    }
+
+    private static bool IsValidNotificationTrustee(WorkflowUserType type, string trusteeId)
+    {
+        if (string.IsNullOrWhiteSpace(trusteeId))
+            return false;
+
+        if (type == WorkflowUserType.Approvers)
+            return true;
+
+        if (type == WorkflowUserType.Email)
+            return trusteeId.Contains('@', StringComparison.Ordinal) && !trusteeId.EndsWith("@", StringComparison.Ordinal);
+
+        return true;
     }
 
     private static List<WorkflowAdminItem> ApplyFilters(
@@ -661,6 +817,84 @@ public class WorkflowService : IWorkflowService
         {
             // Best-effort untag — don't mask the original error
         }
+    }
+
+    private async Task<(bool Visible, string? OwnerDisplayName, string? OwnerUserId, string? ShareStatus)> CheckWorkflowVisibilityAsync(
+        string workflowId,
+        string workflowName,
+        CancellationToken ct)
+    {
+        try
+        {
+            var packet = await _apiClient.GetWorkflowsBasicAsync(ct);
+            var found = packet.Workflows.FirstOrDefault(w =>
+                string.Equals(w.WorkflowId, workflowId, StringComparison.OrdinalIgnoreCase)
+                || string.Equals(w.WorkflowName, workflowName, StringComparison.OrdinalIgnoreCase));
+
+            if (found is null)
+                return (false, null, null, null);
+
+            return (true, found.OwnerDisplayName, found.OwnerUserId, found.ShareStatus);
+        }
+        catch
+        {
+            // Visibility check should never fail the create operation.
+            return (true, null, null, null);
+        }
+    }
+
+    private async Task<string?> ValidateReviewerTrusteePersistenceAsync(
+        WorkflowInputModel input,
+        string workflowId,
+        CancellationToken ct)
+    {
+        var expectedReviewerByStep = input.Steps
+            .Select(s => new
+            {
+                StepName = s.Name?.Trim() ?? string.Empty,
+                ReviewerIds = s.Trustees
+                    .Where(t => t.Role == TrusteeRole.Reviewer)
+                    .Select(t => t.TrusteeId?.Trim() ?? string.Empty)
+                    .Where(id => !string.IsNullOrWhiteSpace(id))
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            })
+            .Where(x => x.ReviewerIds.Count > 0)
+            .ToList();
+
+        if (expectedReviewerByStep.Count == 0)
+            return null;
+
+        var persisted = await _apiClient.GetWorkflowAsync(workflowId, ct);
+
+        foreach (var expected in expectedReviewerByStep)
+        {
+            var persistedStep = persisted.WorkflowStepModels
+                .Where(s => !s.BDeleted)
+                .FirstOrDefault(s =>
+                    string.Equals(s.WorkflowStepDefinition.Name?.Trim(), expected.StepName, StringComparison.OrdinalIgnoreCase));
+
+            if (persistedStep is null)
+            {
+                return $"Workflow saved but step '{expected.StepName}' was not found during trustee persistence verification.";
+            }
+
+            var actualReviewerIds = (persistedStep.WorkflowTrusteeDefinitions ?? new List<WorkflowTrusteeDefinition>())
+                .Select(t => t.TrusteeId?.Trim() ?? string.Empty)
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            var missing = expected.ReviewerIds
+                .Where(id => !actualReviewerIds.Contains(id))
+                .ToList();
+
+            if (missing.Count > 0)
+            {
+                return $"Workflow saved but reviewer trustees did not persist on step '{expected.StepName}'. " +
+                       $"Missing: {string.Join(", ", missing)}.";
+            }
+        }
+
+        return null;
     }
 
     private async Task<TrusteeResolutionResult> ResolveTrusteesAsync(
@@ -745,13 +979,6 @@ public class WorkflowService : IWorkflowService
                     break;
 
                 case MatchConfidence.None:
-                    if (LooksLikeLoginId(entry.Trustee.TrusteeId))
-                    {
-                        // Accept direct LoginID values even when user-list enumeration is incomplete.
-                        // Server-side save still validates the trustee ID.
-                        break;
-                    }
-
                     result.Failures.Add(new TrusteeResolutionFailure
                     {
                         WorkflowName = entry.Workflow.Name,
@@ -773,18 +1000,6 @@ public class WorkflowService : IWorkflowService
 
         var trimmed = trusteeId.Trim();
         return trimmed.Contains(' ') || trimmed.Contains(',');
-    }
-
-    private static bool LooksLikeLoginId(string trusteeId)
-    {
-        if (string.IsNullOrWhiteSpace(trusteeId))
-            return false;
-
-        var trimmed = trusteeId.Trim();
-        if (trimmed.Contains(' ') || trimmed.Contains(','))
-            return false;
-
-        return trimmed.All(c => char.IsLetterOrDigit(c) || c == '.' || c == '_' || c == '-');
     }
 
     private class TrusteeResolutionResult
