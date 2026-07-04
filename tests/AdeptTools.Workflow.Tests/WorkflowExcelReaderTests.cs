@@ -338,6 +338,56 @@ public class WorkflowExcelReaderTests : IDisposable
         Assert.False(wf.Steps[1].AllowEmptyTrustees);
     }
 
+    [Fact]
+    public void Read_GroupTrusteesStayOnCorrectStep_WithContinuationRows()
+    {
+        var path = CreateVerticalWorkbook("StepGroupBinding", sheet =>
+        {
+            // Draft has reviewer + notify group.
+            sheet.Cells[8, 1].Value = "Draft";
+            sheet.Cells[8, 5].Value = "reviewer1";
+            sheet.Cells[8, 6].Value = "User";
+            sheet.Cells[8, 7].Value = "Reviewer";
+
+            sheet.Cells[9, 5].Value = "Designers";
+            sheet.Cells[9, 6].Value = "Group";
+            sheet.Cells[9, 7].Value = "Notify";
+
+            // Review starts on a new row with its own reviewer.
+            sheet.Cells[10, 1].Value = "Review";
+            sheet.Cells[10, 5].Value = "reviewer2";
+            sheet.Cells[10, 6].Value = "User";
+            sheet.Cells[10, 7].Value = "Reviewer";
+
+            // Continuation row omits type/role and should inherit within Review only.
+            sheet.Cells[11, 5].Value = "Field Engineers";
+            sheet.Cells[11, 6].Value = "Group";
+            sheet.Cells[11, 7].Value = "Notify";
+        });
+
+        var reader = new WorkflowExcelReader();
+        var result = reader.Read(path);
+
+        var wf = result.Workflows[0];
+        Assert.Equal(2, wf.Steps.Count);
+
+        var draft = wf.Steps[0];
+        Assert.Equal("Draft", draft.Name);
+        Assert.Contains(draft.Trustees, t =>
+            t.TrusteeType == WorkflowUserType.Group &&
+            t.Role == TrusteeRole.EmailNotify &&
+            t.TrusteeId == "Designers");
+        Assert.DoesNotContain(draft.Trustees, t => t.TrusteeId == "Field Engineers");
+
+        var review = wf.Steps[1];
+        Assert.Equal("Review", review.Name);
+        Assert.Contains(review.Trustees, t =>
+            t.TrusteeType == WorkflowUserType.Group &&
+            t.Role == TrusteeRole.EmailNotify &&
+            t.TrusteeId == "Field Engineers");
+        Assert.DoesNotContain(review.Trustees, t => t.TrusteeId == "Designers");
+    }
+
     // --- Helper ---
 
     private string CreateVerticalWorkbook(string workflowName, Action<ExcelWorksheet> configureSheet)

@@ -309,6 +309,95 @@ public class WorkflowServiceCreateTests
         }
     }
 
+    [Fact]
+    public async Task CreateAsync_InvalidGroupTrustee_FailsBeforeSave()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var capturingClient = new CapturingSaveClient(
+            savedModels,
+            groups: new List<AdeptGroupEntry>
+            {
+                new() { GroupId = "engineering", Name = "Engineering" }
+            });
+        var service = CreateService(capturingClient);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Invalid Group WF"" Active=""true"">
+            <Steps>
+                <Step Name=""Draft"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                        <Trustee Id=""eng-managers"" Type=""Group"" Role=""Notify"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.CreateAsync(
+                new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Failed);
+            Assert.Empty(savedModels);
+            Assert.Contains(result.Results, r =>
+                r.Status == WorkflowResultStatus.Fail &&
+                (r.Message ?? string.Empty).Contains("invalid group ID", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
+    public async Task CreateAsync_GroupNameTrustee_IsResolvedToGroupId_BeforeSave()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var capturingClient = new CapturingSaveClient(
+            savedModels,
+            groups: new List<AdeptGroupEntry>
+            {
+                new() { GroupId = "grp-designers", Name = "Designers" }
+            });
+        var service = CreateService(capturingClient);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Valid Group Name WF"" Active=""true"">
+            <Steps>
+                <Step Name=""Draft"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                        <Trustee Id=""Designers"" Type=""Group"" Role=""Notify"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.CreateAsync(
+                new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Single(savedModels);
+
+            var notify = savedModels[0].WorkflowStepModels[0].EmailNotificationList;
+            Assert.Single(notify);
+            Assert.Equal("grp-designers", notify[0].TrusteeId);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
         [Fact]
         public async Task CreateAsync_PropagatesWorkflowSharedFlag_ToSavedModel()
         {
@@ -348,7 +437,7 @@ public class WorkflowServiceCreateTests
         }
 
     [Fact]
-    public async Task CreateAsync_DryRun_FailsUnresolvedUserTrustees_WhenUserListIsIncomplete()
+    public async Task CreateAsync_DryRun_AllowsLoginIdTrustees_WhenUserListIsIncomplete()
     {
         var client = new IncompleteUsersClient();
         var service = CreateService(client);
@@ -395,8 +484,53 @@ public class WorkflowServiceCreateTests
                 new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = true });
 
             Assert.Equal(2, result.Total);
-            Assert.Equal(0, result.Succeeded);
-            Assert.Equal(2, result.Failed);
+            Assert.Equal(2, result.Succeeded);
+            Assert.Equal(0, result.Failed);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
+    public async Task CreateAsync_CanonicalizesExactUserIdCasing_BeforeSave()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var client = new CapturingSaveClient(savedModels, users: new List<AdeptUserEntry>
+        {
+            new() { UserId = "Asmith", DisplayName = "Al Smith" }
+        });
+        var service = CreateService(client);
+
+        var xmlPath = CreateTempXmlWithRoles(new[]
+        {
+            new WorkflowInputModel
+            {
+                Name = "Case Canon WF",
+                Active = true,
+                Steps = new List<WorkflowInputStep>
+                {
+                    new()
+                    {
+                        Name = "Review",
+                        Trustees = new List<WorkflowInputTrustee>
+                        {
+                            new() { TrusteeId = "asmith", TrusteeType = WorkflowUserType.User, Role = TrusteeRole.Reviewer }
+                        }
+                    }
+                }
+            }
+        });
+
+        try
+        {
+            var result = await service.CreateAsync(
+                new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Single(savedModels);
+            Assert.Equal("Asmith", savedModels[0].WorkflowStepModels[0].WorkflowTrusteeDefinitions[0].TrusteeId);
         }
         finally
         {
@@ -530,11 +664,19 @@ public class WorkflowServiceCreateTests
     {
         private readonly List<WorkflowEditModel> _saved;
         private readonly List<(string WorkflowId, bool Shared)> _sharedCalls;
+        private readonly List<AdeptUserEntry>? _users;
+        private readonly List<AdeptGroupEntry>? _groups;
 
-        public CapturingSaveClient(List<WorkflowEditModel> saved, List<(string WorkflowId, bool Shared)>? sharedCalls = null)
+        public CapturingSaveClient(
+            List<WorkflowEditModel> saved,
+            List<(string WorkflowId, bool Shared)>? sharedCalls = null,
+            List<AdeptUserEntry>? users = null,
+            List<AdeptGroupEntry>? groups = null)
         {
             _saved = saved;
             _sharedCalls = sharedCalls ?? new List<(string WorkflowId, bool Shared)>();
+            _users = users;
+            _groups = groups;
         }
 
         public override Task<ApiResult> SaveWorkflowAsync(WorkflowEditModel model, CancellationToken ct = default)
@@ -560,6 +702,22 @@ public class WorkflowServiceCreateTests
         {
             _sharedCalls.Add((workflowId, shared));
             return Task.FromResult(ApiResult.Success("Captured share state."));
+        }
+
+        public override async Task<List<AdeptUserEntry>> GetUsersAsync(CancellationToken ct = default)
+        {
+            if (_users is not null)
+                return _users;
+
+            return await base.GetUsersAsync(ct);
+        }
+
+        public override async Task<List<AdeptGroupEntry>> GetGroupsAsync(CancellationToken ct = default)
+        {
+            if (_groups is not null)
+                return _groups;
+
+            return await base.GetGroupsAsync(ct);
         }
     }
 

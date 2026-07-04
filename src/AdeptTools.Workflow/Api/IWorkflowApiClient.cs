@@ -19,4 +19,6 @@ public interface IWorkflowApiClient
     Task<ApiResult> SetWorkflowSharedAsync(string workflowId, bool shared, CancellationToken ct = default);
     Task<List<WorkflowCommonTarget>> GetMetagroupsAsync(CancellationToken ct = default);
     Task<List<AdeptUserEntry>> GetUsersAsync(CancellationToken ct = default);
+    Task<AdeptUserEntry?> GetUserByIdAsync(string userId, CancellationToken ct = default);
+    Task<List<AdeptGroupEntry>> GetGroupsAsync(CancellationToken ct = default);
 }

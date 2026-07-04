@@ -216,6 +216,123 @@ public class HttpWorkflowApiClient : IWorkflowApiClient
         return new List<AdeptUserEntry>();
     }
 
+    public async Task<AdeptUserEntry?> GetUserByIdAsync(string userId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+            return null;
+
+        var endpoint = $"api/user/{Uri.EscapeDataString(userId.Trim())}";
+
+        try
+        {
+            var response = await GetAsyncWithAuthRefreshAsync(endpoint, ct);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+                return null;
+
+            if (!response.IsSuccessStatusCode)
+                return null;
+
+            await EnsureSuccessOrThrowAsync(response, endpoint, ct);
+
+            var payload = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions, ct);
+            if (payload.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+                return null;
+
+            var id = FirstNonEmpty(
+                GetStringProperty(payload, "loginName"),
+                GetStringProperty(payload, "userName"),
+                GetStringProperty(payload, "id"));
+
+            if (string.IsNullOrWhiteSpace(id))
+                return null;
+
+            var displayName = FirstNonEmpty(
+                GetStringProperty(payload, "userName"),
+                GetStringProperty(payload, "displayName"),
+                id);
+
+            return new AdeptUserEntry
+            {
+                UserId = id,
+                DisplayName = displayName,
+                NotificationTargetId = FirstNonEmpty(
+                    GetStringProperty(payload, "id"),
+                    GetStringProperty(payload, "userId"),
+                    GetStringProperty(payload, "loginName"),
+                    id)
+            };
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+        catch (HttpRequestException)
+        {
+            return null;
+        }
+        catch (NotSupportedException)
+        {
+            return null;
+        }
+    }
+
+    public async Task<List<AdeptGroupEntry>> GetGroupsAsync(CancellationToken ct = default)
+    {
+        var endpoint = "api/group/groups";
+
+        try
+        {
+            var response = await GetAsyncWithAuthRefreshAsync(endpoint, ct);
+            if (!response.IsSuccessStatusCode)
+                return new List<AdeptGroupEntry>();
+
+            var payload = await response.Content.ReadFromJsonAsync<JsonElement>(JsonOptions, ct);
+            var groups = new Dictionary<string, AdeptGroupEntry>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var item in EnumerateGroupItems(payload))
+            {
+                if (item.ValueKind != JsonValueKind.Object)
+                    continue;
+
+                var id = FirstNonEmpty(
+                    GetStringProperty(item, "groupId"),
+                    GetStringProperty(item, "adeptGroupId"),
+                    GetStringProperty(item, "id"),
+                    GetStringProperty(item, "groupName"),
+                    GetStringProperty(item, "name"));
+
+                var name = FirstNonEmpty(
+                    GetStringProperty(item, "name"),
+                    GetStringProperty(item, "groupName"),
+                    GetStringProperty(item, "displayName"),
+                    id);
+
+                if (!string.IsNullOrWhiteSpace(id))
+                {
+                    var key = id.Trim();
+                    if (!groups.ContainsKey(key))
+                    {
+                        groups[key] = new AdeptGroupEntry
+                        {
+                            GroupId = key,
+                            Name = name
+                        };
+                    }
+                }
+            }
+
+            return groups.Values.ToList();
+        }
+        catch (HttpRequestException)
+        {
+            return new List<AdeptGroupEntry>();
+        }
+        catch (JsonException)
+        {
+            return new List<AdeptGroupEntry>();
+        }
+    }
+
     private async Task<List<AdeptUserEntry>> MergeWithLegacyUsersAsync(
         List<AdeptUserEntry> primaryUsers,
         CancellationToken ct)
@@ -247,7 +364,8 @@ public class HttpWorkflowApiClient : IWorkflowApiClient
                 merged[user.UserId] = new AdeptUserEntry
                 {
                     UserId = user.UserId,
-                    DisplayName = user.DisplayName
+                    DisplayName = user.DisplayName,
+                    NotificationTargetId = user.NotificationTargetId
                 };
             }
 
@@ -264,7 +382,8 @@ public class HttpWorkflowApiClient : IWorkflowApiClient
                 merged[userId] = new AdeptUserEntry
                 {
                     UserId = userId,
-                    DisplayName = displayName
+                    DisplayName = displayName,
+                    NotificationTargetId = userId
                 };
             }
 
@@ -310,7 +429,13 @@ public class HttpWorkflowApiClient : IWorkflowApiClient
             users[userId] = new AdeptUserEntry
             {
                 UserId = userId,
-                DisplayName = displayName
+                DisplayName = displayName,
+                NotificationTargetId = FirstNonEmpty(
+                    GetStringProperty(item, "id"),
+                    GetStringProperty(item, "userId"),
+                    GetStringProperty(item, "loginName"),
+                    GetStringProperty(item, "loginId"),
+                    userId)
             };
         }
 
@@ -343,6 +468,35 @@ public class HttpWorkflowApiClient : IWorkflowApiClient
         }
 
         // Some installations return a single user object.
+        yield return payload;
+    }
+
+    private static IEnumerable<JsonElement> EnumerateGroupItems(JsonElement payload)
+    {
+        if (payload.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in payload.EnumerateArray())
+                yield return item;
+
+            yield break;
+        }
+
+        if (payload.ValueKind != JsonValueKind.Object)
+            yield break;
+
+        foreach (var key in new[] { "groups", "items", "data", "results" })
+        {
+            if (TryGetPropertyIgnoreCase(payload, key, out var container) &&
+                container.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in container.EnumerateArray())
+                    yield return item;
+
+                yield break;
+            }
+        }
+
+        // Some installations return a single group object.
         yield return payload;
     }
 

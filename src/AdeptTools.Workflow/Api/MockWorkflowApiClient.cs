@@ -232,4 +232,26 @@ public class MockWorkflowApiClient : IWorkflowApiClient
             new() { UserId = "notifyUser", DisplayName = "Notify, User" }
         });
     }
+
+    public virtual async Task<AdeptUserEntry?> GetUserByIdAsync(string userId, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(userId))
+            return null;
+
+        var users = await GetUsersAsync(ct);
+        return users.FirstOrDefault(u =>
+            string.Equals(u.UserId, userId.Trim(), StringComparison.OrdinalIgnoreCase));
+    }
+
+    public virtual Task<List<AdeptGroupEntry>> GetGroupsAsync(CancellationToken ct = default)
+    {
+        return Task.FromResult(new List<AdeptGroupEntry>
+        {
+            new() { GroupId = "engineering", Name = "Engineering" },
+            new() { GroupId = "eng-managers", Name = "Engineering Manager" },
+            new() { GroupId = "alertGroup", Name = "Alert Group" },
+            new() { GroupId = "Designers", Name = "Designers" },
+            new() { GroupId = "Field Engineers", Name = "Field Engineers" }
+        });
+    }
 }

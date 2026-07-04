@@ -73,6 +73,24 @@ public class WorkflowService : IWorkflowService
             return batch;
         }
 
+        var groupValidation = await ValidateGroupTrusteesAsync(input.Workflows, ct);
+        if (!groupValidation.IsValid)
+        {
+            foreach (var failure in groupValidation.Failures)
+            {
+                batch.Results.Add(new WorkflowOperationResult
+                {
+                    WorkflowName = failure.WorkflowName,
+                    Status = WorkflowResultStatus.Fail,
+                    Message = failure.Message
+                });
+                batch.Failed++;
+            }
+
+            batch.Total = groupValidation.Failures.Count;
+            return batch;
+        }
+
         if (request.DryRun)
         {
             foreach (var wf in input.Workflows)
@@ -185,7 +203,7 @@ public class WorkflowService : IWorkflowService
                 {
                     WorkflowName = input.Name,
                     Status = WorkflowResultStatus.Fail,
-                    Message = saveResult.ErrorMessage ?? "Save failed."
+                    Message = FormatApiFailure("Save failed.", saveResult)
                 };
             }
 
@@ -197,7 +215,7 @@ public class WorkflowService : IWorkflowService
                 {
                     WorkflowName = input.Name,
                     Status = WorkflowResultStatus.Fail,
-                    Message = shareResult.ErrorMessage ?? "Failed to apply workflow share state."
+                    Message = FormatApiFailure("Failed to apply workflow share state.", shareResult)
                 };
             }
 
@@ -248,7 +266,7 @@ public class WorkflowService : IWorkflowService
             {
                 WorkflowName = input.Name,
                 Status = WorkflowResultStatus.Fail,
-                Message = ex.Message
+                Message = $"{ex.GetType().Name}: {ex.Message} | {ex.StackTrace}"
             };
         }
     }
@@ -276,6 +294,24 @@ public class WorkflowService : IWorkflowService
                 batch.Failed++;
             }
             batch.Total = resolutionResult.Failures.Count;
+            return batch;
+        }
+
+        var groupValidation = await ValidateGroupTrusteesAsync(input.Workflows, ct);
+        if (!groupValidation.IsValid)
+        {
+            foreach (var failure in groupValidation.Failures)
+            {
+                batch.Results.Add(new WorkflowOperationResult
+                {
+                    WorkflowName = failure.WorkflowName,
+                    Status = WorkflowResultStatus.Fail,
+                    Message = failure.Message
+                });
+                batch.Failed++;
+            }
+
+            batch.Total = groupValidation.Failures.Count;
             return batch;
         }
 
@@ -424,7 +460,7 @@ public class WorkflowService : IWorkflowService
                 {
                     WorkflowName = input.Name,
                     Status = WorkflowResultStatus.Fail,
-                    Message = saveResult.ErrorMessage ?? "Save failed."
+                    Message = FormatApiFailure("Save failed.", saveResult)
                 };
             }
 
@@ -437,7 +473,18 @@ public class WorkflowService : IWorkflowService
                 {
                     WorkflowName = input.Name,
                     Status = WorkflowResultStatus.Fail,
-                    Message = shareResult.ErrorMessage ?? "Failed to apply workflow share state."
+                    Message = FormatApiFailure("Failed to apply workflow share state.", shareResult)
+                };
+            }
+
+            var trusteePersistenceError = await ValidateReviewerTrusteePersistenceAsync(input, workflowId, ct);
+            if (!string.IsNullOrWhiteSpace(trusteePersistenceError))
+            {
+                return new WorkflowOperationResult
+                {
+                    WorkflowName = input.Name,
+                    Status = WorkflowResultStatus.Fail,
+                    Message = trusteePersistenceError
                 };
             }
 
@@ -458,7 +505,7 @@ public class WorkflowService : IWorkflowService
             {
                 WorkflowName = input.Name,
                 Status = WorkflowResultStatus.Fail,
-                Message = ex.Message
+                Message = $"{ex.GetType().Name}: {ex.Message} | {ex.StackTrace}"
             };
         }
     }
@@ -566,7 +613,7 @@ public class WorkflowService : IWorkflowService
                         {
                             WorkflowName = wf.WorkflowName,
                             Status = WorkflowResultStatus.Fail,
-                            Message = deleteResult.ErrorMessage ?? "Delete failed."
+                            Message = FormatApiFailure("Delete failed.", deleteResult)
                         };
                     }
                 }
@@ -576,7 +623,7 @@ public class WorkflowService : IWorkflowService
                     {
                         WorkflowName = wf.WorkflowName,
                         Status = WorkflowResultStatus.Fail,
-                        Message = ex.Message
+                        Message = $"{ex.GetType().Name}: {ex.Message} | {ex.StackTrace}"
                     };
                 }
 
@@ -697,8 +744,19 @@ public class WorkflowService : IWorkflowService
             Type = t.TrusteeType
         }).ToList();
 
-        stepModel.EmailNotificationList = BuildNotificationDefinitions(emailNotify, workflowId, stepId, out var invalidEmailNotifyCount);
-        stepModel.AlertNotificationList = BuildNotificationDefinitions(alertNotify, workflowId, stepId, out var invalidAlertNotifyCount);
+        stepModel.EmailNotificationList = BuildNotificationDefinitions(
+            emailNotify,
+            workflowId,
+            stepId,
+            WorkflowNotificationAction.Approve,
+            out var invalidEmailNotifyCount);
+
+        stepModel.AlertNotificationList = BuildNotificationDefinitions(
+            alertNotify,
+            workflowId,
+            stepId,
+            WorkflowNotificationAction.Timeout,
+            out var invalidAlertNotifyCount);
 
         var allNotifyInputCount = emailNotify.Count() + alertNotify.Count();
         var validNotifyCount = stepModel.EmailNotificationList.Count + stepModel.AlertNotificationList.Count;
@@ -730,6 +788,7 @@ public class WorkflowService : IWorkflowService
         IEnumerable<WorkflowInputTrustee> trustees,
         string workflowId,
         string stepId,
+        WorkflowNotificationAction action,
         out int invalidCount)
     {
         invalidCount = 0;
@@ -748,8 +807,10 @@ public class WorkflowService : IWorkflowService
             {
                 WorkflowId = workflowId,
                 StepId = stepId,
+                WorkflowObjectId = stepId,
                 TrusteeId = normalizedId,
                 Type = trustee.TrusteeType,
+                Action = action,
                 TargetId = normalizedId,
                 TargetType = trustee.TrusteeType,
                 Email = trustee.TrusteeType == WorkflowUserType.Email ? normalizedId : string.Empty
@@ -848,25 +909,24 @@ public class WorkflowService : IWorkflowService
         string workflowId,
         CancellationToken ct)
     {
-        var expectedReviewerByStep = input.Steps
+        var expectedByStep = input.Steps
             .Select(s => new
             {
                 StepName = s.Name?.Trim() ?? string.Empty,
-                ReviewerIds = s.Trustees
+                Reviewers = s.Trustees
                     .Where(t => t.Role == TrusteeRole.Reviewer)
-                    .Select(t => t.TrusteeId?.Trim() ?? string.Empty)
-                    .Where(id => !string.IsNullOrWhiteSpace(id))
-                    .ToHashSet(StringComparer.OrdinalIgnoreCase)
+                    .Select(t => (Id: t.TrusteeId?.Trim() ?? string.Empty, Type: t.TrusteeType))
+                    .Where(x => !string.IsNullOrWhiteSpace(x.Id))
+                    .ToList()
             })
-            .Where(x => x.ReviewerIds.Count > 0)
             .ToList();
 
-        if (expectedReviewerByStep.Count == 0)
+        if (expectedByStep.All(x => x.Reviewers.Count == 0))
             return null;
 
         var persisted = await _apiClient.GetWorkflowAsync(workflowId, ct);
 
-        foreach (var expected in expectedReviewerByStep)
+        foreach (var expected in expectedByStep)
         {
             var persistedStep = persisted.WorkflowStepModels
                 .Where(s => !s.BDeleted)
@@ -878,23 +938,139 @@ public class WorkflowService : IWorkflowService
                 return $"Workflow saved but step '{expected.StepName}' was not found during trustee persistence verification.";
             }
 
-            var actualReviewerIds = (persistedStep.WorkflowTrusteeDefinitions ?? new List<WorkflowTrusteeDefinition>())
-                .Select(t => t.TrusteeId?.Trim() ?? string.Empty)
-                .Where(id => !string.IsNullOrWhiteSpace(id))
-                .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-            var missing = expected.ReviewerIds
-                .Where(id => !actualReviewerIds.Contains(id))
+            var actualReviewers = (persistedStep.WorkflowTrusteeDefinitions ?? new List<WorkflowTrusteeDefinition>())
+                .Select(t => (Id: t.TrusteeId?.Trim() ?? string.Empty, Type: t.Type))
+                .Where(x => !string.IsNullOrWhiteSpace(x.Id))
                 .ToList();
 
-            if (missing.Count > 0)
+            var missingReviewers = await FindMissingTrusteesAsync(expected.Reviewers, actualReviewers, ct, requireTypeMatch: true);
+
+            if (missingReviewers.Count > 0)
             {
+                var actualReviewerText = actualReviewers.Count == 0
+                    ? "none"
+                    : string.Join(", ", actualReviewers.Select(x => $"{x.Id}({(char)x.Type})"));
+
                 return $"Workflow saved but reviewer trustees did not persist on step '{expected.StepName}'. " +
-                       $"Missing: {string.Join(", ", missing)}.";
+                       $"Missing: [{string.Join(", ", missingReviewers)}]. " +
+                       $"Persisted reviewers: [{actualReviewerText}].";
             }
         }
 
         return null;
+    }
+
+    private async Task<List<string>> FindMissingTrusteesAsync(
+        List<(string Id, WorkflowUserType Type)> expected,
+        List<(string Id, WorkflowUserType Type)> actual,
+        CancellationToken ct,
+        bool requireTypeMatch)
+    {
+        if (expected.Count == 0)
+            return new List<string>();
+
+        var userAliasCache = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        var userDirectoryAliases = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+
+        try
+        {
+            var users = await _apiClient.GetUsersAsync(ct);
+            foreach (var user in users)
+            {
+                var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+                if (!string.IsNullOrWhiteSpace(user.UserId))
+                    aliases.Add(user.UserId.Trim().ToUpperInvariant());
+
+                if (!string.IsNullOrWhiteSpace(user.NotificationTargetId))
+                    aliases.Add(user.NotificationTargetId.Trim().ToUpperInvariant());
+
+                if (aliases.Count == 0)
+                    continue;
+
+                if (!string.IsNullOrWhiteSpace(user.UserId))
+                    userDirectoryAliases[user.UserId.Trim()] = new HashSet<string>(aliases, StringComparer.OrdinalIgnoreCase);
+
+                if (!string.IsNullOrWhiteSpace(user.NotificationTargetId))
+                    userDirectoryAliases[user.NotificationTargetId.Trim()] = new HashSet<string>(aliases, StringComparer.OrdinalIgnoreCase);
+            }
+        }
+        catch (Exception ex) when (ex is HttpRequestException || ex is NotSupportedException)
+        {
+            // Best effort only; fallback lookup path below handles partial environments.
+        }
+
+        async Task<HashSet<string>> ResolveAliasesAsync((string Id, WorkflowUserType Type) item)
+        {
+            var key = item.Id?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(key))
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            if (item.Type != WorkflowUserType.User)
+            {
+                return new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+                {
+                    key.ToUpperInvariant()
+                };
+            }
+
+            if (userAliasCache.TryGetValue(key, out var cached))
+                return cached;
+
+            if (userDirectoryAliases.TryGetValue(key, out var fromDirectory))
+            {
+                userAliasCache[key] = fromDirectory;
+                return fromDirectory;
+            }
+
+            var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                key.ToUpperInvariant()
+            };
+
+            try
+            {
+                var user = await _apiClient.GetUserByIdAsync(key, ct);
+                if (user is not null)
+                {
+                    if (!string.IsNullOrWhiteSpace(user.UserId))
+                        aliases.Add(user.UserId.Trim().ToUpperInvariant());
+
+                    if (!string.IsNullOrWhiteSpace(user.NotificationTargetId))
+                        aliases.Add(user.NotificationTargetId.Trim().ToUpperInvariant());
+                }
+            }
+            catch (Exception ex) when (ex is HttpRequestException || ex is NotSupportedException)
+            {
+                // Best effort only; if lookup is unavailable, compare raw IDs.
+            }
+
+            userAliasCache[key] = aliases;
+            return aliases;
+        }
+
+        var actualAliasSets = new List<(WorkflowUserType Type, HashSet<string> Aliases)>();
+        foreach (var item in actual)
+        {
+            if (string.IsNullOrWhiteSpace(item.Id))
+                continue;
+
+            actualAliasSets.Add((item.Type, await ResolveAliasesAsync(item)));
+        }
+
+        var missing = new List<string>();
+        foreach (var item in expected)
+        {
+            var expectedAliases = await ResolveAliasesAsync(item);
+            var found = actualAliasSets.Any(a =>
+                (!requireTypeMatch || a.Type == item.Type) &&
+                a.Aliases.Overlaps(expectedAliases));
+
+            if (!found)
+                missing.Add($"{item.Id}({(char)item.Type})");
+        }
+
+        return missing;
     }
 
     private async Task<TrusteeResolutionResult> ResolveTrusteesAsync(
@@ -951,6 +1127,63 @@ public class WorkflowService : IWorkflowService
         }
 
         var matcher = new UserMatcher(users);
+        var usersById = users
+            .Where(u => !string.IsNullOrWhiteSpace(u.UserId))
+            .GroupBy(u => u.UserId.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+        var canonicalUserTargetCache = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        static string ToPersistedUserTrusteeId(AdeptUserEntry? user, string fallback)
+        {
+            if (user is null)
+                return fallback;
+
+            if (!string.IsNullOrWhiteSpace(user.NotificationTargetId))
+                return user.NotificationTargetId.Trim();
+
+            if (!string.IsNullOrWhiteSpace(user.UserId))
+                return user.UserId.Trim();
+
+            return fallback;
+        }
+
+        static bool LooksLikeGuidValue(string value)
+        {
+            return Guid.TryParse(value, out _);
+        }
+
+        async Task<string> ResolveCanonicalPersistedIdAsync(string resolvedUserId, string fallback)
+        {
+            if (string.IsNullOrWhiteSpace(resolvedUserId))
+                return fallback;
+
+            if (canonicalUserTargetCache.TryGetValue(resolvedUserId, out var cached))
+                return cached;
+
+            usersById.TryGetValue(resolvedUserId, out var matchedUser);
+            var fromDirectory = ToPersistedUserTrusteeId(matchedUser, resolvedUserId);
+
+            // If we already have a GUID target from directory enumeration, use it directly.
+            if (LooksLikeGuidValue(fromDirectory))
+            {
+                canonicalUserTargetCache[resolvedUserId] = fromDirectory;
+                return fromDirectory;
+            }
+
+            // Some servers expose canonical notification target IDs only on per-user lookup.
+            try
+            {
+                var verified = await _apiClient.GetUserByIdAsync(resolvedUserId, ct);
+                var verifiedId = ToPersistedUserTrusteeId(verified, fromDirectory);
+                canonicalUserTargetCache[resolvedUserId] = verifiedId;
+                return verifiedId;
+            }
+            catch (Exception ex) when (ex is HttpRequestException || ex is NotSupportedException)
+            {
+                canonicalUserTargetCache[resolvedUserId] = fromDirectory;
+                return fromDirectory;
+            }
+        }
 
         foreach (var entry in userTrustees)
         {
@@ -959,12 +1192,22 @@ public class WorkflowService : IWorkflowService
             switch (matchResult.Confidence)
             {
                 case MatchConfidence.Exact:
-                    // Already valid — no change needed
+                    if (!string.IsNullOrWhiteSpace(matchResult.ResolvedUserId))
+                    {
+                        var canonicalId = await ResolveCanonicalPersistedIdAsync(
+                            matchResult.ResolvedUserId,
+                            matchResult.ResolvedUserId);
+
+                        if (!string.Equals(entry.Trustee.TrusteeId, canonicalId, StringComparison.Ordinal))
+                            entry.Trustee.TrusteeId = canonicalId;
+                    }
                     break;
 
                 case MatchConfidence.Strong:
-                    // Auto-resolve: replace input with the actual user ID
-                    entry.Trustee.TrusteeId = matchResult.ResolvedUserId!;
+                    // Persist canonical target IDs for HTTP consistency (GUIDs when provided).
+                    entry.Trustee.TrusteeId = await ResolveCanonicalPersistedIdAsync(
+                        matchResult.ResolvedUserId!,
+                        matchResult.ResolvedUserId!);
                     result.Resolved.Add(matchResult);
                     break;
 
@@ -979,6 +1222,23 @@ public class WorkflowService : IWorkflowService
                     break;
 
                 case MatchConfidence.None:
+                    if (LooksLikeLoginId(entry.Trustee.TrusteeId))
+                    {
+                        // Some environments return incomplete user lists from lookup endpoints.
+                        // Verify directly by user ID if possible, then persist canonical target ID.
+                        var verified = await _apiClient.GetUserByIdAsync(entry.Trustee.TrusteeId, ct);
+                        if (verified is not null && !string.IsNullOrWhiteSpace(verified.UserId))
+                        {
+                            entry.Trustee.TrusteeId = ToPersistedUserTrusteeId(verified, verified.UserId);
+
+                            break;
+                        }
+
+                        // If direct verification is unavailable or blocked, allow token-like IDs
+                        // to continue and rely on save-time persistence guardrails.
+                        break;
+                    }
+
                     result.Failures.Add(new TrusteeResolutionFailure
                     {
                         WorkflowName = entry.Workflow.Name,
@@ -1000,6 +1260,282 @@ public class WorkflowService : IWorkflowService
 
         var trimmed = trusteeId.Trim();
         return trimmed.Contains(' ') || trimmed.Contains(',');
+    }
+
+    private static bool LooksLikeLoginId(string trusteeId)
+    {
+        if (string.IsNullOrWhiteSpace(trusteeId))
+            return false;
+
+        var trimmed = trusteeId.Trim();
+        if (trimmed.Contains(' ') || trimmed.Contains(','))
+            return false;
+
+        return trimmed.All(c => char.IsLetterOrDigit(c) || c == '.' || c == '_' || c == '-');
+    }
+
+    private async Task<GroupTrusteeValidationResult> ValidateGroupTrusteesAsync(
+        List<WorkflowInputModel> workflows,
+        CancellationToken ct)
+    {
+        var result = new GroupTrusteeValidationResult();
+
+        var groupTrustees = workflows
+            .SelectMany(wf => wf.Steps.SelectMany(step => step.Trustees.Select(trustee => new
+            {
+                Workflow = wf,
+                Step = step,
+                Trustee = trustee
+            })))
+            .Where(x => x.Trustee.TrusteeType == WorkflowUserType.Group)
+            .ToList();
+
+        if (groupTrustees.Count == 0)
+        {
+            result.IsValid = true;
+            return result;
+        }
+
+        List<AdeptGroupEntry> groups;
+        try
+        {
+            groups = await _apiClient.GetGroupsAsync(ct);
+        }
+        catch (Exception ex) when (ex is HttpRequestException || ex is NotSupportedException)
+        {
+            foreach (var entry in groupTrustees)
+            {
+                result.Failures.Add(new TrusteeResolutionFailure
+                {
+                    WorkflowName = entry.Workflow.Name,
+                    Message = $"Trustee \"{entry.Trustee.TrusteeId}\" in step \"{entry.Step.Name}\": " +
+                              "this server does not expose the group list endpoint needed for group validation. " +
+                              "Provide a verified Adept group ID."
+                });
+            }
+
+            result.IsValid = false;
+            return result;
+        }
+
+        var byId = new Dictionary<string, AdeptGroupEntry>(StringComparer.OrdinalIgnoreCase);
+        var byName = new Dictionary<string, AdeptGroupEntry>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var g in groups)
+        {
+            if (!string.IsNullOrWhiteSpace(g.GroupId))
+                byId[g.GroupId.Trim()] = g;
+
+            if (!string.IsNullOrWhiteSpace(g.Name))
+                byName[g.Name.Trim()] = g;
+        }
+
+        foreach (var entry in groupTrustees)
+        {
+            var id = entry.Trustee.TrusteeId?.Trim() ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(id))
+            {
+                result.Failures.Add(new TrusteeResolutionFailure
+                {
+                    WorkflowName = entry.Workflow.Name,
+                    Message = $"Trustee group ID is blank in step \"{entry.Step.Name}\"."
+                });
+                continue;
+            }
+
+            if (byId.TryGetValue(id, out var byIdGroup))
+            {
+                entry.Trustee.TrusteeId = byIdGroup.GroupId;
+                continue;
+            }
+
+            if (byName.TryGetValue(id, out var byNameGroup))
+            {
+                entry.Trustee.TrusteeId = byNameGroup.GroupId;
+                continue;
+            }
+
+            if (TryFindSingleCaseInsensitiveNameMatch(groups, id, out var fuzzyByName))
+            {
+                entry.Trustee.TrusteeId = fuzzyByName!.GroupId;
+                continue;
+            }
+
+            if (TryFindSingleCaseInsensitiveIdMatch(groups, id, out var fuzzyById))
+            {
+                entry.Trustee.TrusteeId = fuzzyById!.GroupId;
+                continue;
+            }
+
+            if (TryFindSingleNormalizedNameMatch(groups, id, out var normalizedByName))
+            {
+                entry.Trustee.TrusteeId = normalizedByName!.GroupId;
+                continue;
+            }
+
+            if (TryFindSingleNormalizedIdMatch(groups, id, out var normalizedById))
+            {
+                entry.Trustee.TrusteeId = normalizedById!.GroupId;
+                continue;
+            }
+
+            var hint = FindClosestGroupNameHint(groups, id);
+            var hintText = string.IsNullOrWhiteSpace(hint)
+                ? string.Empty
+                : $" Did you mean '{hint}'?";
+
+            if (!byId.ContainsKey(id) && !byName.ContainsKey(id))
+            {
+                result.Failures.Add(new TrusteeResolutionFailure
+                {
+                    WorkflowName = entry.Workflow.Name,
+                    Message = $"Trustee \"{id}\" in step \"{entry.Step.Name}\": invalid group ID. " +
+                              "Use an existing Adept group ID or group name from the Group API." + hintText
+                });
+            }
+        }
+
+        result.IsValid = result.Failures.Count == 0;
+        return result;
+    }
+
+    private static bool TryFindSingleCaseInsensitiveNameMatch(
+        List<AdeptGroupEntry> groups,
+        string candidate,
+        out AdeptGroupEntry? match)
+    {
+        var matches = groups
+            .Where(g => string.Equals(g.Name?.Trim(), candidate, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        match = matches.Count == 1 ? matches[0] : null;
+        return match is not null;
+    }
+
+    private static bool TryFindSingleCaseInsensitiveIdMatch(
+        List<AdeptGroupEntry> groups,
+        string candidate,
+        out AdeptGroupEntry? match)
+    {
+        var matches = groups
+            .Where(g => string.Equals(g.GroupId?.Trim(), candidate, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        match = matches.Count == 1 ? matches[0] : null;
+        return match is not null;
+    }
+
+    private static bool TryFindSingleNormalizedNameMatch(
+        List<AdeptGroupEntry> groups,
+        string candidate,
+        out AdeptGroupEntry? match)
+    {
+        var key = NormalizeToken(candidate);
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            match = null;
+            return false;
+        }
+
+        var matches = groups
+            .Where(g => string.Equals(NormalizeToken(g.Name), key, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        match = matches.Count == 1 ? matches[0] : null;
+        return match is not null;
+    }
+
+    private static bool TryFindSingleNormalizedIdMatch(
+        List<AdeptGroupEntry> groups,
+        string candidate,
+        out AdeptGroupEntry? match)
+    {
+        var key = NormalizeToken(candidate);
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            match = null;
+            return false;
+        }
+
+        var matches = groups
+            .Where(g => string.Equals(NormalizeToken(g.GroupId), key, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        match = matches.Count == 1 ? matches[0] : null;
+        return match is not null;
+    }
+
+    private static string NormalizeToken(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        return new string(value.Trim()
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToUpperInvariant)
+            .ToArray());
+    }
+
+    private static string? FindClosestGroupNameHint(List<AdeptGroupEntry> groups, string input)
+    {
+        var normalized = NormalizeToken(input);
+        if (string.IsNullOrWhiteSpace(normalized))
+            return null;
+
+        return groups
+            .Select(g => g.Name)
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .OrderBy(n => LevenshteinDistance(NormalizeToken(n), normalized))
+            .FirstOrDefault();
+    }
+
+    private static int LevenshteinDistance(string a, string b)
+    {
+        if (string.IsNullOrEmpty(a)) return b.Length;
+        if (string.IsNullOrEmpty(b)) return a.Length;
+
+        var d = new int[a.Length + 1, b.Length + 1];
+        for (var i = 0; i <= a.Length; i++) d[i, 0] = i;
+        for (var j = 0; j <= b.Length; j++) d[0, j] = j;
+
+        for (var i = 1; i <= a.Length; i++)
+        {
+            for (var j = 1; j <= b.Length; j++)
+            {
+                var cost = a[i - 1] == b[j - 1] ? 0 : 1;
+                d[i, j] = Math.Min(
+                    Math.Min(d[i - 1, j] + 1, d[i, j - 1] + 1),
+                    d[i - 1, j - 1] + cost);
+            }
+        }
+
+        return d[a.Length, b.Length];
+    }
+
+    private static string FormatApiFailure(string fallbackMessage, AdeptTools.Core.Models.ApiResult? result)
+    {
+        if (result is null)
+            return fallbackMessage;
+
+        var details = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(result.ErrorMessage))
+            details.Add($"ErrorMessage: {result.ErrorMessage}");
+
+        if (!string.IsNullOrWhiteSpace(result.ResultMsg))
+            details.Add($"ResultMsg: {result.ResultMsg}");
+
+        details.Add($"StatusCode: {result.StatusCode}");
+
+        return details.Count == 0
+            ? fallbackMessage
+            : $"{fallbackMessage} {string.Join(" | ", details)}";
+    }
+
+    private class GroupTrusteeValidationResult
+    {
+        public bool IsValid { get; set; }
+        public List<TrusteeResolutionFailure> Failures { get; } = new();
     }
 
     private class TrusteeResolutionResult

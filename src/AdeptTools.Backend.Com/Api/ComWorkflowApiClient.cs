@@ -547,6 +547,20 @@ public class ComWorkflowApiClient : IWorkflowApiClient
             "User list retrieval is not supported via COM. Use the HTTP backend for name resolution.");
     }
 
+    public Task<AdeptUserEntry?> GetUserByIdAsync(string userId, CancellationToken ct = default)
+    {
+        // COM SDK does not expose user lookup by user ID. This operation requires the HTTP backend.
+        throw new NotSupportedException(
+            "User lookup by ID is not supported via COM. Use the HTTP backend for trustee validation.");
+    }
+
+    public Task<List<AdeptGroupEntry>> GetGroupsAsync(CancellationToken ct = default)
+    {
+        // COM SDK does not expose group enumeration in this client path.
+        throw new NotSupportedException(
+            "Group list retrieval is not supported via COM. Use the HTTP backend for group trustee validation.");
+    }
+
     private static WorkflowEditModel MapWorkflowToEditModel(object nxWf)
     {
         var model = new WorkflowEditModel
