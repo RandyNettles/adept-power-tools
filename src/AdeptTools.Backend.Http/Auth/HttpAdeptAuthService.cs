@@ -18,6 +18,7 @@ public class HttpAdeptAuthService : IAdeptAuthService
 
     private const int CallbackPortRangeStart = 49100;
     private const int CallbackPortRangeEnd = 49110;
+    private const int MinimumTokenDurationSeconds = 3600;
 
     // Cognito app client has exactly http://localhost:51555/callback registered.
     private const int CognitoCallbackPort = 51555;
@@ -306,7 +307,8 @@ public class HttpAdeptAuthService : IAdeptAuthService
                 RedirectUri = redirectUri,
                 CodeVerifier = codeVerifier,
                 ForceLogin = false,
-                ClientId = "Adept"
+                ClientId = "Adept",
+                TokenDurationSeconds = MinimumTokenDurationSeconds
             };
 
             // Use PostLoginAsync so we read the body on 4xx responses and surface the real error.
@@ -413,7 +415,8 @@ public class HttpAdeptAuthService : IAdeptAuthService
                 UserName = userName,
                 Password = password,
                 ForceLogin = false,
-                ClientId = "Adept"
+                ClientId = "Adept",
+                TokenDurationSeconds = MinimumTokenDurationSeconds
             };
 
             var (authResponse2, rawBody2) = await PostLoginAsync(loginRequest, ct);
@@ -619,7 +622,8 @@ public class HttpAdeptAuthService : IAdeptAuthService
                 SsoStateHash = pendingStateHash,
                 SsoNonce = pending.SsoNonce,
                 ClientId = "Adept",
-                ForceLogin = false
+                ForceLogin = false,
+                TokenDurationSeconds = MinimumTokenDurationSeconds
             };
 
             // Include the 230 Bearer token so the server can find the pending session.
