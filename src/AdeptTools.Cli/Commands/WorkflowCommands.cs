@@ -264,7 +264,7 @@ public static class WorkflowCommands
             var manifest = context.ParseResult.GetValueForOption(manifestOption);
 
             // Safety: reject wildcard-only without --force
-            if ((filter == "*" || filter == "**") && !force)
+            if ((filter == "*" || filter == "**") && !dryRun && !force)
             {
                 Console.Error.WriteLine("Error: wildcard-only filter requires --force to prevent accidental deletion of all workflows.");
                 context.ExitCode = 1;
@@ -276,32 +276,43 @@ public static class WorkflowCommands
                 new WorkflowListRequest { Filter = filter },
                 context.GetCancellationToken());
 
-            if (listResult.TotalCount == 0)
+            var eligibleWorkflows = listResult.Workflows
+                .Where(w => status.ToLowerInvariant() switch
+                {
+                    "active" => w.Active,
+                    "inactive" => !w.Active,
+                    _ => true
+                })
+                .Where(w => w.Delete)
+                .Where(w => string.IsNullOrWhiteSpace(w.LockedByDisplayName))
+                .ToList();
+
+            if (eligibleWorkflows.Count == 0)
             {
-                Console.WriteLine($"  No workflows match filter '{filter}'.");
+                Console.WriteLine($"  No deletable workflows match filter '{filter}' with status '{status}'.");
                 context.ExitCode = 2;
                 return;
             }
 
             // Show pre-deletion table
             Console.WriteLine();
-            Console.WriteLine($"  Workflows to delete: {listResult.TotalCount}");
+            Console.WriteLine($"  Workflows to delete: {eligibleWorkflows.Count}");
             Console.WriteLine();
             Console.WriteLine($"  {"Name",-30} {"Active",-8} {"Steps",-7} {"In-Process",-12}");
             Console.WriteLine($"  {new string('─', 30)} {new string('─', 8)} {new string('─', 7)} {new string('─', 12)}");
 
             const int MaxPreviewRows = 25;
-            var totalInProcess = listResult.Workflows.Sum(w => w.InProcessCount);
-            foreach (var wf in listResult.Workflows.Take(MaxPreviewRows))
+            var totalInProcess = eligibleWorkflows.Sum(w => w.InProcessCount);
+            foreach (var wf in eligibleWorkflows.Take(MaxPreviewRows))
             {
                 var active = wf.Active ? "✓" : "✗";
                 var inProcess = wf.InProcessCount > 0 ? $"{wf.InProcessCount} docs ⚠" : "0";
                 Console.WriteLine($"  {wf.WorkflowName,-30} {active,-8} {wf.StepCount,-7} {inProcess,-12}");
             }
 
-            if (listResult.Workflows.Count > MaxPreviewRows)
+            if (eligibleWorkflows.Count > MaxPreviewRows)
             {
-                Console.WriteLine($"  ... and {listResult.Workflows.Count - MaxPreviewRows} more workflows");
+                Console.WriteLine($"  ... and {eligibleWorkflows.Count - MaxPreviewRows} more workflows");
             }
 
             if (totalInProcess > 0)
@@ -312,8 +323,20 @@ public static class WorkflowCommands
 
             if (dryRun)
             {
+                await service.DeleteAsync(new WorkflowDeleteRequest
+                {
+                    Filter = filter,
+                    Status = status,
+                    DryRun = true,
+                    Force = true,
+                    ManifestPath = manifest,
+                    PreFetchedPacket = listResult.Packet
+                }, null, context.GetCancellationToken());
+
                 Console.WriteLine();
                 Console.WriteLine("  DRY RUN — no changes made.");
+                if (manifest is not null)
+                    Console.WriteLine($"  Manifest saved to: {manifest}");
                 context.ExitCode = 0;
                 return;
             }
@@ -321,7 +344,7 @@ public static class WorkflowCommands
             // Confirmation
             if (!force && !settings.MockMode)
             {
-                Console.Write($"\n  Delete these {listResult.TotalCount} workflows? [y/N] ");
+                Console.Write($"\n  Delete these {eligibleWorkflows.Count} workflows? [y/N] ");
                 var response = Console.ReadLine();
                 if (!string.Equals(response?.Trim(), "y", StringComparison.OrdinalIgnoreCase))
                 {

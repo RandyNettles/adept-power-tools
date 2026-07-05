@@ -98,6 +98,7 @@ public class AuthCommandTests
         rootCommand.AddGlobalOption(verboseOption);
         rootCommand.AddGlobalOption(logOption);
         rootCommand.AddCommand(AuthCommands.CreateAuthCommand());
+        rootCommand.AddCommand(WorkflowCommands.CreateWorkflowCommand());
 
         return new CommandLineBuilder(rootCommand)
             .UseDefaults()
@@ -149,5 +150,41 @@ public class AuthCommandTests
                 await next(context);
             })
             .Build();
+    }
+
+    [Fact]
+    public async Task WorkflowDelete_DryRun_StatusFilterPreviewMatchesRealDeleteSet()
+    {
+        var (exitCode, output) = await InvokeCliWithOutput(
+            "workflow", "delete", "--filter", "*", "--status", "inactive", "--dry-run", "--mock");
+
+        Assert.Equal(0, exitCode);
+        Assert.Contains("Workflows to delete: 1", output);
+        Assert.Contains("Final Check", output);
+        Assert.DoesNotContain("Design Review", output);
+        Assert.DoesNotContain("Piping Approval", output);
+    }
+
+    [Fact]
+    public async Task WorkflowDelete_DryRun_WritesManifestWhenRequested()
+    {
+        var manifestPath = Path.Combine(Path.GetTempPath(), $"workflow_delete_manifest_{Guid.NewGuid():N}.json");
+
+        try
+        {
+            var (exitCode, output) = await InvokeCliWithOutput(
+                "workflow", "delete", "--filter", "*Review*", "--dry-run", "--manifest", manifestPath, "--mock");
+
+            Assert.Equal(0, exitCode);
+            Assert.True(File.Exists(manifestPath));
+            Assert.Contains("Manifest saved to:", output);
+            var manifestJson = File.ReadAllText(manifestPath);
+            Assert.Contains("Design Review", manifestJson);
+        }
+        finally
+        {
+            if (File.Exists(manifestPath))
+                File.Delete(manifestPath);
+        }
     }
 }
