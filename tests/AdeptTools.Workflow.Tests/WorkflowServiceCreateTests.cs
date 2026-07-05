@@ -271,6 +271,54 @@ public class WorkflowServiceCreateTests
         }
 
     [Fact]
+    public async Task CreateAsync_WithNoNotifications_BDoEmailNotifyFalse()
+    {
+        // Per deep-dive 9.12.1: ATP must explicitly drive BDoEmailNotify=false when no
+        // notification recipients are declared (full-replace authoring semantics).
+        var savedModels = new List<WorkflowEditModel>();
+        var capturingClient = new CapturingSaveClient(savedModels);
+        var service = CreateService(capturingClient);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Reviewer Only WF"" Active=""true"">
+            <Steps>
+                <Step Name=""Review Step"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.CreateAsync(
+                new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Single(savedModels);
+
+            var saved = savedModels[0];
+            var step = saved.WorkflowStepModels[0];
+
+            // No notifications declared → flag must be false on step and workflow.
+            Assert.False(step.WorkflowStepDefinition.BDoEmailNotify);
+            Assert.False(saved.WorkflowDefinition.BDoEmailNotify);
+
+            // Notification lists must be empty.
+            Assert.Empty(step.EmailNotificationList);
+            Assert.Empty(step.AlertNotificationList);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
         public async Task CreateAsync_AllNotifyRecipientsInvalid_FailsWithActionableMessage()
     {
         var savedModels = new List<WorkflowEditModel>();

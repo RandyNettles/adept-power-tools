@@ -102,6 +102,72 @@ public class WorkflowServiceModifyTests
     }
 
     [Fact]
+    public async Task ModifyAsync_WhenNotificationsRemoved_ClearsBDoEmailNotify()
+    {
+        // Per deep-dive 9.12.1: a modify that removes all notification recipients must
+        // set BDoEmailNotify=false (full-replace authoring semantics — desired state is
+        // declared completely in the input file).
+        var savedModels = new List<WorkflowEditModel>();
+
+        // Server has a step that previously had notifications (BDoEmailNotify=true).
+        var existingStep = new WorkflowStepModel
+        {
+            WorkflowStepDefinition = new WorkflowStepDefinition
+            {
+                StepId = "step-1",
+                Name = "Review",
+                BDoEmailNotify = true   // stale state from previous config
+            },
+            EmailNotificationList = new List<WorkflowNotificationDefinition>
+            {
+                new() { TrusteeId = "oldUser", Action = WorkflowNotificationAction.Approve }
+            },
+            AlertNotificationList = new List<WorkflowNotificationDefinition>()
+        };
+
+        var client = new CapturingModifyClient(savedModels, existingStep: existingStep);
+        var service = CreateService(client);
+
+        // New input has NO notification trustees on that step.
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Design Review"" Active=""true"">
+            <Steps>
+                <Step Name=""Review"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.ModifyAsync(
+                new WorkflowModifyRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Single(savedModels);
+
+            var saved = savedModels[0];
+            var step = saved.WorkflowStepModels[0];
+
+            // No notifications in input → flag must be cleared on step and workflow.
+            Assert.False(step.WorkflowStepDefinition.BDoEmailNotify);
+            Assert.False(saved.WorkflowDefinition.BDoEmailNotify);
+
+            Assert.Empty(step.EmailNotificationList);
+            Assert.Empty(step.AlertNotificationList);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
     public async Task ModifyAsync_RejectsDuplicateStepNamesInWorkflow()
     {
         var savedModels = new List<WorkflowEditModel>();
@@ -324,10 +390,12 @@ public class WorkflowServiceModifyTests
     private class CapturingModifyClient : MockWorkflowApiClient
     {
         protected readonly List<WorkflowEditModel> SavedModels;
+        private readonly WorkflowStepModel? _overrideStep;
 
-        public CapturingModifyClient(List<WorkflowEditModel> saved)
+        public CapturingModifyClient(List<WorkflowEditModel> saved, WorkflowStepModel? existingStep = null)
         {
             SavedModels = saved;
+            _overrideStep = existingStep;
         }
 
         public override Task<WorkflowEditModel> TagAsync(string workflowId, CancellationToken ct = default)
@@ -348,15 +416,9 @@ public class WorkflowServiceModifyTests
 
         protected virtual WorkflowEditModel BuildInitialWorkflow(string workflowId)
         {
-            return new WorkflowEditModel
-            {
-                BEditable = true,
-                WorkflowDefinition = new WorkflowDefinition
-                {
-                    WorkflowId = workflowId,
-                    Name = "Design Review"
-                },
-                WorkflowStepModels = new List<WorkflowStepModel>
+            var steps = _overrideStep is not null
+                ? new List<WorkflowStepModel> { _overrideStep }
+                : new List<WorkflowStepModel>
                 {
                     new()
                     {
@@ -368,7 +430,17 @@ public class WorkflowServiceModifyTests
                             Name = "Review"
                         }
                     }
-                }
+                };
+
+            return new WorkflowEditModel
+            {
+                BEditable = true,
+                WorkflowDefinition = new WorkflowDefinition
+                {
+                    WorkflowId = workflowId,
+                    Name = "Design Review"
+                },
+                WorkflowStepModels = steps
             };
         }
 

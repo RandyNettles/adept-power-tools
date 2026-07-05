@@ -200,11 +200,10 @@ public class WorkflowService : IWorkflowService
                 }
             }
 
-            // Enable workflow-level email notify if any step has notification trustees
-            if (model.WorkflowStepModels.Any(s => s.EmailNotificationList.Count > 0 || s.AlertNotificationList.Count > 0))
-            {
-                model.WorkflowDefinition.BDoEmailNotify = true;
-            }
+            // Explicitly drive BDoEmailNotify both directions so a full-replace
+            // authoring operation reflects the declared input state, not stale server state.
+            model.WorkflowDefinition.BDoEmailNotify =
+                model.WorkflowStepModels.Any(s => s.EmailNotificationList.Count > 0 || s.AlertNotificationList.Count > 0);
 
             // 5. Save
             var saveResult = await _apiClient.SaveWorkflowAsync(model, ct);
@@ -532,11 +531,10 @@ public class WorkflowService : IWorkflowService
                 }
             }
 
-            // Enable workflow-level email notify if any step has notification trustees
-            if (model.WorkflowStepModels.Any(s => s.EmailNotificationList.Count > 0 || s.AlertNotificationList.Count > 0))
-            {
-                model.WorkflowDefinition.BDoEmailNotify = true;
-            }
+            // Explicitly drive BDoEmailNotify both directions so a full-replace
+            // authoring operation reflects the declared input state, not stale server state.
+            model.WorkflowDefinition.BDoEmailNotify =
+                model.WorkflowStepModels.Any(s => s.EmailNotificationList.Count > 0 || s.AlertNotificationList.Count > 0);
 
             // Save
             var saveResult = await _apiClient.SaveWorkflowAsync(model, ct);
@@ -864,11 +862,10 @@ public class WorkflowService : IWorkflowService
                    "Provide valid user/group/key/email recipients, or use Approvers.";
         }
 
-        // Enable email notify flag if notification trustees exist
-        if (stepModel.EmailNotificationList.Count > 0 || stepModel.AlertNotificationList.Count > 0)
-        {
-            stepModel.WorkflowStepDefinition.BDoEmailNotify = true;
-        }
+        // Explicitly drive BDoEmailNotify both directions so a full-replace
+        // authoring operation reflects the declared input state, not stale server state.
+        stepModel.WorkflowStepDefinition.BDoEmailNotify =
+            stepModel.EmailNotificationList.Count > 0 || stepModel.AlertNotificationList.Count > 0;
 
         return null;
     }
