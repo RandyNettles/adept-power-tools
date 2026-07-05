@@ -25,14 +25,8 @@ public sealed class WorkflowUserTypeJsonConverter : JsonConverter<WorkflowUserTy
 
     public override void Write(Utf8JsonWriter writer, WorkflowUserType value, JsonSerializerOptions options)
     {
-        // Keep single-letter wire format for known values, but do not emit
-        // invalid control characters for default/unknown enum values.
-        if (Enum.IsDefined(typeof(WorkflowUserType), value))
-        {
-            writer.WriteStringValue(((char)value).ToString());
-            return;
-        }
-
+        // Match AdeptWebClient/Web API workflow save payloads, which use
+        // numeric character codes like 85 ('U') rather than string tokens.
         writer.WriteNumberValue((int)value);
     }
 
@@ -75,14 +69,8 @@ public sealed class WorkflowNotificationActionJsonConverter : JsonConverter<Work
 
     public override void Write(Utf8JsonWriter writer, WorkflowNotificationAction value, JsonSerializerOptions options)
     {
-        // Keep single-letter wire format for known values, but avoid emitting
-        // problematic characters for unknown enum values.
-        if (Enum.IsDefined(typeof(WorkflowNotificationAction), value))
-        {
-            writer.WriteStringValue(((char)value).ToString());
-            return;
-        }
-
+        // Match AdeptWebClient/Web API workflow save payloads, which use
+        // numeric character codes like 84 ('T') rather than string tokens.
         writer.WriteNumberValue((int)value);
     }
 
