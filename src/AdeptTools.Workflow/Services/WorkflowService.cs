@@ -292,6 +292,24 @@ public class WorkflowService : IWorkflowService
         var input = ReadInput(request.InputFilePath);
         var batch = new WorkflowBatchResult { Total = input.Workflows.Count, DryRun = request.DryRun };
 
+        // Validate using server-advertised limits and local structural rules.
+        var setup = await _apiClient.GetSetupAsync(ct);
+        var validation = _validator.Validate(input.Workflows, setup);
+        if (!validation.IsValid)
+        {
+            foreach (var error in validation.Errors)
+            {
+                batch.Results.Add(new WorkflowOperationResult
+                {
+                    WorkflowName = error.WorkflowName ?? "Unknown",
+                    Status = WorkflowResultStatus.Fail,
+                    Message = error.Message
+                });
+                batch.Failed++;
+            }
+            return batch;
+        }
+
         // Name resolution — resolve all User-type trustees before proceeding
         var resolutionResult = await ResolveTrusteesAsync(input.Workflows, ct);
         if (!resolutionResult.AllResolved)
