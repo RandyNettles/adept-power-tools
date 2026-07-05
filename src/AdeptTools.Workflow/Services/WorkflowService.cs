@@ -596,14 +596,25 @@ public class WorkflowService : IWorkflowService
                 };
             }
 
+            var (visibleToCurrentContext, ownerDisplay, ownerUserId, shareStatus) =
+                await CheckWorkflowVisibilityAsync(workflowId, input.Name, ct);
+
             await _apiClient.UntagAsync(workflowId, ct);
 
             var totalTrustees = input.Steps.Sum(s => s.Trustees.Count);
+            var ownership = string.IsNullOrWhiteSpace(ownerDisplay)
+                ? (string.IsNullOrWhiteSpace(ownerUserId) ? "unknown" : ownerUserId)
+                : ownerDisplay;
+            var sharedText = input.Shared ? "shared" : "not-shared";
+            var visibilityWarning = visibleToCurrentContext
+                ? string.Empty
+                : " WARNING: workflow was saved but is not visible in current list context.";
+
             return new WorkflowOperationResult
             {
                 WorkflowName = input.Name,
                 Status = WorkflowResultStatus.Success,
-                Message = $"{input.Name}: modified ({input.Steps.Count} steps, {totalTrustees} trustees)",
+                Message = $"{input.Name}: modified ({input.Steps.Count} steps, {totalTrustees} trustees, owner: {ownership}, shared: {sharedText}, share-status: {shareStatus ?? "unknown"}).{visibilityWarning}",
                 StepCount = input.Steps.Count,
                 TrusteeCount = totalTrustees
             };

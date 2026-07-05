@@ -496,7 +496,7 @@ public class WorkflowServiceModifyTests
                 new WorkflowModifyRequest { InputFilePath = xmlPath, DryRun = false });
 
             Assert.Equal(1, result.Succeeded);
-            Assert.Equal(new[] { "tag", "get", "save", "share", "verify", "untag" }, client.CallSequence);
+            Assert.Equal(new[] { "visibility", "tag", "get", "save", "share", "verify", "visibility", "untag" }, client.CallSequence);
         }
         finally
         {
@@ -530,10 +530,48 @@ public class WorkflowServiceModifyTests
                 new WorkflowModifyRequest { InputFilePath = xmlPath, DryRun = false });
 
             Assert.Equal(1, result.Failed);
-            Assert.Equal(new[] { "tag", "get", "save", "share", "verify", "untag" }, client.CallSequence);
+            Assert.Equal(new[] { "visibility", "tag", "get", "save", "share", "verify", "untag" }, client.CallSequence);
             Assert.Contains(result.Results, r =>
                 r.Status == WorkflowResultStatus.Fail &&
                 (r.Message ?? string.Empty).Contains("did not persist", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
+    public async Task ModifyAsync_SuccessMessage_ProjectsOwnershipAndShareStatus()
+    {
+        var client = new TrackingModifyClient();
+        var service = CreateService(client);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Design Review"" Active=""true"" Shared=""true"">
+            <Steps>
+                <Step Name=""Review"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.ModifyAsync(
+                new WorkflowModifyRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Contains(result.Results, r =>
+                r.Status == WorkflowResultStatus.Success
+                && (r.Message ?? string.Empty).Contains("owner: Jane Owner", StringComparison.Ordinal)
+                && (r.Message ?? string.Empty).Contains("shared: shared", StringComparison.Ordinal)
+                && (r.Message ?? string.Empty).Contains("share-status: Shared", StringComparison.Ordinal));
         }
         finally
         {
@@ -800,6 +838,25 @@ public class WorkflowServiceModifyTests
                     EmailNotificationList = step.EmailNotificationList,
                     AlertNotificationList = step.AlertNotificationList
                 }).ToList()
+            });
+        }
+
+        public override Task<WorkflowAdminPacket> GetWorkflowsBasicAsync(CancellationToken ct = default)
+        {
+            CallSequence.Add("visibility");
+            return Task.FromResult(new WorkflowAdminPacket
+            {
+                Workflows = new List<WorkflowAdminItem>
+                {
+                    new()
+                    {
+                        WorkflowId = "wf-001",
+                        WorkflowName = "Design Review",
+                        OwnerDisplayName = "Jane Owner",
+                        OwnerUserId = "jowner",
+                        ShareStatus = "Shared"
+                    }
+                }
             });
         }
 
