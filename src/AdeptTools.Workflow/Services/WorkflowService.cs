@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using AdeptTools.Core.Models;
 using AdeptTools.Workflow.Api;
 using AdeptTools.Workflow.Input;
 using AdeptTools.Workflow.Models;
@@ -201,9 +202,14 @@ public class WorkflowService : IWorkflowService
                 };
             }
 
-            for (int s = 0; s < input.Steps.Count && s < model.WorkflowStepModels.Count; s++)
+            var orderedCreateSteps = model.WorkflowStepModels
+                .Where(s => !s.BDeleted)
+                .OrderBy(s => s.WorkflowStepDefinition.Order)
+                .ToList();
+
+            for (int s = 0; s < input.Steps.Count && s < orderedCreateSteps.Count; s++)
             {
-                var notificationValidationError = ConfigureStep(model.WorkflowStepModels[s], input.Steps[s], workflowId);
+                var notificationValidationError = ConfigureStep(orderedCreateSteps[s], input.Steps[s], workflowId);
                 if (!string.IsNullOrWhiteSpace(notificationValidationError))
                 {
                     await TryUntagAsync(workflowId, ct);
@@ -216,13 +222,17 @@ public class WorkflowService : IWorkflowService
                 }
             }
 
+            // Server-side save applies notifications from step models. Keep top-level
+            // collections empty to avoid duplicate notifications from dual sources.
+            ClearWorkflowNotifications(model);
+
             // Explicitly drive BDoEmailNotify both directions so a full-replace
             // authoring operation reflects the declared input state, not stale server state.
             model.WorkflowDefinition.BDoEmailNotify =
                 model.WorkflowStepModels.Any(s => s.EmailNotificationList.Count > 0 || s.AlertNotificationList.Count > 0);
 
             // 5. Save
-            var saveResult = await _apiClient.SaveWorkflowAsync(model, ct);
+            var saveResult = await SaveWorkflowWithTransientRetryAsync(model, ct);
             if (!saveResult.IsSuccess)
             {
                 await TryUntagAsync(workflowId, ct);
@@ -578,13 +588,17 @@ public class WorkflowService : IWorkflowService
                 }
             }
 
+            // Server-side save applies notifications from step models. Keep top-level
+            // collections empty to avoid duplicate notifications from dual sources.
+            ClearWorkflowNotifications(model);
+
             // Explicitly drive BDoEmailNotify both directions so a full-replace
             // authoring operation reflects the declared input state, not stale server state.
             model.WorkflowDefinition.BDoEmailNotify =
                 model.WorkflowStepModels.Any(s => s.EmailNotificationList.Count > 0 || s.AlertNotificationList.Count > 0);
 
             // Save
-            var saveResult = await _apiClient.SaveWorkflowAsync(model, ct);
+            var saveResult = await SaveWorkflowWithTransientRetryAsync(model, ct);
             if (!saveResult.IsSuccess)
             {
                 await _apiClient.UntagAsync(workflowId, ct);
@@ -904,6 +918,14 @@ public class WorkflowService : IWorkflowService
             WorkflowNotificationAction.Timeout,
             out var invalidAlertNotifyCount);
 
+        // Defensive normalization: keep only notifications explicitly bound to this step.
+        stepModel.EmailNotificationList = stepModel.EmailNotificationList
+            .Where(n => string.Equals(n.StepId, stepId, StringComparison.Ordinal))
+            .ToList();
+        stepModel.AlertNotificationList = stepModel.AlertNotificationList
+            .Where(n => string.Equals(n.StepId, stepId, StringComparison.Ordinal))
+            .ToList();
+
         var allNotifyInputCount = emailNotify.Count() + alertNotify.Count();
         var validNotifyCount = stepModel.EmailNotificationList.Count + stepModel.AlertNotificationList.Count;
         var invalidNotifyCount = invalidEmailNotifyCount + invalidAlertNotifyCount;
@@ -991,6 +1013,35 @@ public class WorkflowService : IWorkflowService
         return notifications;
     }
 
+    private async Task<ApiResult> SaveWorkflowWithTransientRetryAsync(
+        WorkflowEditModel model,
+        CancellationToken ct)
+    {
+        var firstAttempt = await _apiClient.SaveWorkflowAsync(model, ct);
+        if (firstAttempt.IsSuccess || !IsRetryableDisposedDbContextError(firstAttempt))
+            return firstAttempt;
+
+        // Some server builds intermittently throw a disposed DbContext during save.
+        // Retry once to recover from that known transient path.
+        return await _apiClient.SaveWorkflowAsync(model, ct);
+    }
+
+    private static bool IsRetryableDisposedDbContextError(ApiResult result)
+    {
+        if (result.IsSuccess)
+            return false;
+
+        if (result.StatusCode != 139)
+            return false;
+
+        var msg = result.ErrorMessage ?? result.ResultMsg ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(msg))
+            return false;
+
+        return msg.Contains("Cannot access a disposed context instance", StringComparison.OrdinalIgnoreCase)
+               || msg.Contains("MsSqlDatabaseContext", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string? ValidateDistinctStepNames(WorkflowInputModel input)
     {
         var duplicate = input.Steps
@@ -1017,6 +1068,12 @@ public class WorkflowService : IWorkflowService
             return trusteeId.Contains('@', StringComparison.Ordinal) && !trusteeId.EndsWith("@", StringComparison.Ordinal);
 
         return true;
+    }
+
+    private static void ClearWorkflowNotifications(WorkflowEditModel model)
+    {
+        model.EmailNotificationList = new List<WorkflowNotificationDefinition>();
+        model.AlertNotificationList = new List<WorkflowNotificationDefinition>();
     }
 
     private static List<WorkflowAdminItem> ApplyFilters(

@@ -169,6 +169,98 @@ public class WorkflowServiceModifyTests
     }
 
     [Fact]
+    public async Task ModifyAsync_SaveTransientDisposedContext_RetriesOnce_ThenSucceeds()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var client = new TransientSaveFailureModifyClient(savedModels);
+        var service = CreateService(client);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Design Review"" Active=""true"">
+            <Steps>
+                <Step Name=""Review"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.ModifyAsync(
+                new WorkflowModifyRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Single(savedModels);
+            Assert.Equal(2, client.SaveAttemptCount);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
+    public async Task ModifyAsync_TwoSteps_OnlyFirstStepNotifier_DoesNotAssignNotifierToSecondStep()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var client = new CapturingModifyClient(savedModels);
+        var service = CreateService(client);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Design Review"" Active=""true"">
+            <Steps>
+                <Step Name=""Review"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                        <Trustee Id=""Designers"" Type=""Group"" Role=""Notify"" />
+                    </Trustees>
+                </Step>
+                <Step Name=""Approve"">
+                    <Trustees>
+                        <Trustee Id=""reviewer2"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.ModifyAsync(
+                new WorkflowModifyRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Single(savedModels);
+
+            var saved = savedModels[0];
+            var reviewStep = saved.WorkflowStepModels.Single(s =>
+                string.Equals(s.WorkflowStepDefinition.Name, "Review", StringComparison.OrdinalIgnoreCase));
+            var approveStep = saved.WorkflowStepModels.Single(s =>
+                string.Equals(s.WorkflowStepDefinition.Name, "Approve", StringComparison.OrdinalIgnoreCase));
+
+            Assert.Single(reviewStep.EmailNotificationList);
+            Assert.All(reviewStep.EmailNotificationList, n => Assert.Equal(reviewStep.WorkflowStepDefinition.StepId, n.StepId));
+            Assert.Empty(approveStep.EmailNotificationList);
+            Assert.Empty(approveStep.AlertNotificationList);
+
+            // Keep workflow-level lists empty to avoid duplicate application.
+            Assert.Empty(saved.EmailNotificationList);
+            Assert.Empty(saved.AlertNotificationList);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
     public async Task ModifyAsync_WhenNotificationsRemoved_ClearsBDoEmailNotify()
     {
         // Per deep-dive 9.12.1: a modify that removes all notification recipients must
@@ -1006,6 +1098,29 @@ public class WorkflowServiceModifyTests
         {
             CallSequence.Add("untag");
             return Task.FromResult(ApiResult.Success());
+        }
+    }
+
+    private sealed class TransientSaveFailureModifyClient : CapturingModifyClient
+    {
+        public TransientSaveFailureModifyClient(List<WorkflowEditModel> saved)
+            : base(saved)
+        {
+        }
+
+        public int SaveAttemptCount { get; private set; }
+
+        public override Task<ApiResult> SaveWorkflowAsync(WorkflowEditModel model, CancellationToken ct = default)
+        {
+            SaveAttemptCount++;
+            if (SaveAttemptCount == 1)
+            {
+                return Task.FromResult(ApiResult.Failure(
+                    139,
+                    "Cannot access a disposed context instance. Object name: 'MsSqlDatabaseContext'."));
+            }
+
+            return base.SaveWorkflowAsync(model, ct);
         }
     }
 }

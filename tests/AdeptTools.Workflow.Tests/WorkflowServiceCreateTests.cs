@@ -448,6 +448,126 @@ public class WorkflowServiceCreateTests
     }
 
     [Fact]
+    public async Task CreateAsync_TwoSteps_OnlyFirstStepNotifier_DoesNotAssignNotifierToSecondStep()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var capturingClient = new CapturingSaveClient(
+            savedModels,
+            groups: new List<AdeptGroupEntry>
+            {
+                new() { GroupId = "grp-designers", Name = "Designers" }
+            });
+        var service = CreateService(capturingClient);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Two Step Notify WF"" Active=""true"">
+            <Steps>
+                <Step Name=""Draft"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                        <Trustee Id=""Designers"" Type=""Group"" Role=""Notify"" />
+                    </Trustees>
+                </Step>
+                <Step Name=""Review"">
+                    <Trustees>
+                        <Trustee Id=""reviewer2"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.CreateAsync(
+                new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Single(savedModels);
+
+            var saved = savedModels[0];
+            Assert.Equal(2, saved.WorkflowStepModels.Count);
+
+            var step1 = saved.WorkflowStepModels[0];
+            var step2 = saved.WorkflowStepModels[1];
+
+            Assert.Contains(step1.EmailNotificationList, n =>
+                n.Type == WorkflowUserType.Group &&
+                n.TrusteeId == "grp-designers");
+            Assert.All(step1.EmailNotificationList, n => Assert.Equal(step1.WorkflowStepDefinition.StepId, n.StepId));
+            Assert.Empty(step2.EmailNotificationList);
+            Assert.Empty(step2.AlertNotificationList);
+
+            // Keep workflow-level lists empty to avoid duplicate application.
+            Assert.Empty(saved.EmailNotificationList);
+            Assert.Empty(saved.AlertNotificationList);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
+    public async Task CreateAsync_WhenServerStepsOutOfOrder_AssignsNotificationsByStepOrder()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var client = new OutOfOrderCreateStepsClient(
+            savedModels,
+            groups: new List<AdeptGroupEntry>
+            {
+                new() { GroupId = "grp-designers", Name = "Designers" }
+            });
+        var service = CreateService(client);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Create Order Mapping WF"" Active=""true"">
+            <Steps>
+                <Step Name=""Draft"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                        <Trustee Id=""Designers"" Type=""Group"" Role=""Notify"" />
+                    </Trustees>
+                </Step>
+                <Step Name=""Review"">
+                    <Trustees>
+                        <Trustee Id=""reviewer2"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.CreateAsync(
+                new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Single(savedModels);
+
+            var saved = savedModels[0];
+            var draft = saved.WorkflowStepModels.Single(s =>
+                string.Equals(s.WorkflowStepDefinition.Name, "Draft", StringComparison.OrdinalIgnoreCase));
+            var review = saved.WorkflowStepModels.Single(s =>
+                string.Equals(s.WorkflowStepDefinition.Name, "Review", StringComparison.OrdinalIgnoreCase));
+
+            Assert.Single(draft.EmailNotificationList);
+            Assert.Equal("grp-designers", draft.EmailNotificationList[0].TrusteeId);
+            Assert.Empty(review.EmailNotificationList);
+            Assert.Empty(review.AlertNotificationList);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
     public async Task CreateAsync_RejectsInvalidReviewerTrusteeType()
     {
         var savedModels = new List<WorkflowEditModel>();
@@ -523,6 +643,42 @@ public class WorkflowServiceCreateTests
             Assert.Single(step.AlertNotificationList);
             Assert.Equal(WorkflowNotificationAction.Approve, step.EmailNotificationList[0].Action);
             Assert.Equal(WorkflowNotificationAction.Timeout, step.AlertNotificationList[0].Action);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
+    public async Task CreateAsync_SaveTransientDisposedContext_RetriesOnce_ThenSucceeds()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var client = new TransientSaveFailureClient(savedModels);
+        var service = CreateService(client);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Retry Save Create WF"" Active=""true"">
+            <Steps>
+                <Step Name=""Review Step"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.CreateAsync(
+                new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Single(savedModels);
+            Assert.Equal(2, client.SaveAttemptCount);
         }
         finally
         {
@@ -1037,6 +1193,54 @@ public class WorkflowServiceCreateTests
                 throw new NotSupportedException("Group directory lookup disabled for this backend.");
 
             return base.GetGroupsAsync(ct);
+        }
+    }
+
+    private sealed class TransientSaveFailureClient : CapturingSaveClient
+    {
+        public TransientSaveFailureClient(List<WorkflowEditModel> saved)
+            : base(saved)
+        {
+        }
+
+        public int SaveAttemptCount { get; private set; }
+
+        public override Task<ApiResult> SaveWorkflowAsync(WorkflowEditModel model, CancellationToken ct = default)
+        {
+            SaveAttemptCount++;
+            if (SaveAttemptCount == 1)
+            {
+                return Task.FromResult(ApiResult.Failure(
+                    139,
+                    "Cannot access a disposed context instance. Object name: 'MsSqlDatabaseContext'."));
+            }
+
+            return base.SaveWorkflowAsync(model, ct);
+        }
+    }
+
+    private sealed class OutOfOrderCreateStepsClient : CapturingSaveClient
+    {
+        public OutOfOrderCreateStepsClient(
+            List<WorkflowEditModel> saved,
+            List<(string WorkflowId, bool Shared)>? sharedCalls = null,
+            List<AdeptUserEntry>? users = null,
+            List<AdeptGroupEntry>? groups = null)
+            : base(saved, sharedCalls, users, groups)
+        {
+        }
+
+        public override Task<WorkflowEditModel> AddStepAsync(WorkflowEditModel model, int position, CancellationToken ct = default)
+        {
+            return base.AddStepAsync(model, position, ct).ContinueWith(t =>
+            {
+                var updated = t.Result;
+                // Simulate backend returning collection order that does not match step order.
+                updated.WorkflowStepModels = updated.WorkflowStepModels
+                    .OrderByDescending(s => s.WorkflowStepDefinition.Order)
+                    .ToList();
+                return updated;
+            }, ct);
         }
     }
 }
