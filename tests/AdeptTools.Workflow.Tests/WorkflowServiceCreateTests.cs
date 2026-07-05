@@ -185,6 +185,9 @@ public class WorkflowServiceCreateTests
 
             // Step-level email notify flag
             Assert.True(step.WorkflowStepDefinition.BDoEmailNotify);
+
+            // Step-level alert/timeout flag — must be enabled when alert trustees are present
+            Assert.True(step.WorkflowStepDefinition.BTimeoutOn);
         }
         finally
         {

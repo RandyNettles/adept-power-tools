@@ -277,7 +277,7 @@ public class WorkflowService : IWorkflowService
                 await CheckWorkflowVisibilityAsync(workflowId, input.Name, ct);
 
             // 7. Release the edit tag after the full create flow completes.
-            await _apiClient.UntagAsync(workflowId, ct);
+            var createUntagResult = await _apiClient.UntagAsync(workflowId, ct);
 
             var totalTrustees = input.Steps.Sum(s => s.Trustees.Count);
             var ownership = string.IsNullOrWhiteSpace(ownerDisplay)
@@ -287,12 +287,15 @@ public class WorkflowService : IWorkflowService
             var visibilityWarning = visibleToCurrentContext
                 ? string.Empty
                 : " WARNING: workflow was saved but is not visible in current list context.";
+            var untagWarning = createUntagResult.IsSuccess
+                ? string.Empty
+                : " WARNING: workflow was saved but the edit lock may not have been released — verify in the web client.";
 
             return new WorkflowOperationResult
             {
                 WorkflowName = input.Name,
                 Status = WorkflowResultStatus.Success,
-                Message = $"Created ({input.Steps.Count} steps, {totalTrustees} trustees, owner: {ownership}, shared: {sharedText}, share-status: {shareStatus ?? "unknown"}).{visibilityWarning}",
+                Message = $"Created ({input.Steps.Count} steps, {totalTrustees} trustees, owner: {ownership}, shared: {sharedText}, share-status: {shareStatus ?? "unknown"}).{visibilityWarning}{untagWarning}",
                 StepCount = input.Steps.Count,
                 TrusteeCount = totalTrustees
             };
@@ -641,7 +644,7 @@ public class WorkflowService : IWorkflowService
             var (visibleToCurrentContext, ownerDisplay, ownerUserId, shareStatus) =
                 await CheckWorkflowVisibilityAsync(workflowId, input.Name, ct);
 
-            await _apiClient.UntagAsync(workflowId, ct);
+            var modifyUntagResult = await _apiClient.UntagAsync(workflowId, ct);
 
             var totalTrustees = input.Steps.Sum(s => s.Trustees.Count);
             var ownership = string.IsNullOrWhiteSpace(ownerDisplay)
@@ -651,12 +654,15 @@ public class WorkflowService : IWorkflowService
             var visibilityWarning = visibleToCurrentContext
                 ? string.Empty
                 : " WARNING: workflow was saved but is not visible in current list context.";
+            var untagWarning = modifyUntagResult.IsSuccess
+                ? string.Empty
+                : " WARNING: workflow was saved but the edit lock may not have been released — verify in the web client.";
 
             return new WorkflowOperationResult
             {
                 WorkflowName = input.Name,
                 Status = WorkflowResultStatus.Success,
-                Message = $"{input.Name}: modified ({input.Steps.Count} steps, {totalTrustees} trustees, owner: {ownership}, shared: {sharedText}, share-status: {shareStatus ?? "unknown"}).{visibilityWarning}",
+                Message = $"{input.Name}: modified ({input.Steps.Count} steps, {totalTrustees} trustees, owner: {ownership}, shared: {sharedText}, share-status: {shareStatus ?? "unknown"}).{visibilityWarning}{untagWarning}",
                 StepCount = input.Steps.Count,
                 TrusteeCount = totalTrustees
             };
@@ -939,6 +945,10 @@ public class WorkflowService : IWorkflowService
         // authoring operation reflects the declared input state, not stale server state.
         stepModel.WorkflowStepDefinition.BDoEmailNotify =
             stepModel.EmailNotificationList.Count > 0 || stepModel.AlertNotificationList.Count > 0;
+
+        // Enable the step-level alert/timeout flag when alert trustees are present so the
+        // server treats the alert notification list as active.
+        stepModel.WorkflowStepDefinition.BTimeoutOn = stepModel.AlertNotificationList.Count > 0;
 
         return null;
     }
