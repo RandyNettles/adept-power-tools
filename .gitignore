@@ -6,3 +6,4 @@ obj/
 *.cache
 publish/
 publish-launcher-temp/
+login-ids.txt

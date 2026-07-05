@@ -2,6 +2,7 @@ using System.CommandLine;
 using System.CommandLine.Invocation;
 using AdeptTools.Core.Configuration;
 using AdeptTools.Core.Logging;
+using AdeptTools.Workflow.Api;
 using AdeptTools.Workflow.Results;
 using AdeptTools.Workflow.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -14,10 +15,72 @@ public static class WorkflowCommands
     {
         var workflowCommand = new Command("workflow", "Workflow administration commands");
         workflowCommand.AddCommand(CreateListCommand());
+        workflowCommand.AddCommand(CreateUsersCommand());
         workflowCommand.AddCommand(CreateCreateCommand());
         workflowCommand.AddCommand(CreateModifyCommand());
         workflowCommand.AddCommand(CreateDeleteCommand());
         return workflowCommand;
+    }
+
+    private static Command CreateUsersCommand()
+    {
+        var outputOption = new Option<string>("--out", () => "login-ids.txt", "Output file path for login IDs");
+        outputOption.AddAlias("-o");
+
+        var formatOption = new Option<string>("--format", () => "txt", "Output format: txt, csv, json");
+
+        var cmd = new Command("users", "Export workflow-eligible users (login IDs)");
+        cmd.AddOption(outputOption);
+        cmd.AddOption(formatOption);
+
+        cmd.SetHandler(async (InvocationContext context) =>
+        {
+            var sp = context.BindingContext.GetRequiredService<IServiceProvider>();
+            var apiClient = sp.GetRequiredService<IWorkflowApiClient>();
+
+            var outputPath = context.ParseResult.GetValueForOption(outputOption)!;
+            var format = context.ParseResult.GetValueForOption(formatOption)!.Trim().ToLowerInvariant();
+
+            if (format is not ("txt" or "csv" or "json"))
+            {
+                Console.Error.WriteLine("Error: --format must be one of: txt, csv, json.");
+                context.ExitCode = 1;
+                return;
+            }
+
+            var users = await apiClient.GetUsersAsync(context.GetCancellationToken());
+            var loginIds = users
+                .Select(u => u.UserId?.Trim())
+                .Where(id => !string.IsNullOrWhiteSpace(id))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(id => id, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outputPath)) ?? ".");
+
+            if (format == "json")
+            {
+                var json = System.Text.Json.JsonSerializer.Serialize(loginIds,
+                    new System.Text.Json.JsonSerializerOptions { WriteIndented = true });
+                await File.WriteAllTextAsync(outputPath, json, context.GetCancellationToken());
+            }
+            else if (format == "csv")
+            {
+                var lines = new List<string> { "LoginId" };
+                lines.AddRange(loginIds.Select(id => $"\"{id!.Replace("\"", "\"\"")}\""));
+                await File.WriteAllLinesAsync(outputPath, lines, context.GetCancellationToken());
+            }
+            else
+            {
+                await File.WriteAllLinesAsync(outputPath, loginIds!, context.GetCancellationToken());
+            }
+
+            Console.WriteLine();
+            Console.WriteLine($"  Exported {loginIds.Count} login ID(s) to: {Path.GetFullPath(outputPath)}");
+            context.ExitCode = 0;
+        });
+
+        return cmd;
     }
 
     private static Command CreateListCommand()
