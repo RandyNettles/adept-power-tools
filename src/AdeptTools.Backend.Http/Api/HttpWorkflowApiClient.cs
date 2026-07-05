@@ -199,7 +199,8 @@ public class HttpWorkflowApiClient : IWorkflowApiClient
                 .Select(u => new AdeptUserEntry
                 {
                     UserId = u.LoginName ?? string.Empty,
-                    DisplayName = string.IsNullOrWhiteSpace(u.UserName) ? u.LoginName ?? string.Empty : u.UserName
+                    DisplayName = string.IsNullOrWhiteSpace(u.UserName) ? u.LoginName ?? string.Empty : u.UserName,
+                    NotificationTargetId = !string.IsNullOrWhiteSpace(u.Id) ? u.Id : u.LoginName
                 })
                 .ToList();
         }
@@ -396,7 +397,7 @@ public class HttpWorkflowApiClient : IWorkflowApiClient
                     {
                         UserId = userId,
                         DisplayName = displayName,
-                        NotificationTargetId = userId
+                        NotificationTargetId = !string.IsNullOrWhiteSpace(legacy.Id) ? legacy.Id : userId
                     };
                 }
             }
@@ -594,6 +595,7 @@ public class HttpWorkflowApiClient : IWorkflowApiClient
 
     private class LegacyUserInfo
     {
+        public string? Id { get; set; }
         public string? LoginName { get; set; }
         public string? UserName { get; set; }
     }
