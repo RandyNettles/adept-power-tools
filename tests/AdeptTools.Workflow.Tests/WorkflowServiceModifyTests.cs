@@ -243,6 +243,77 @@ public class WorkflowServiceModifyTests
         }
     }
 
+    [Fact]
+    public async Task ModifyAsync_UntagHappensAfterPostSaveTrusteeVerification()
+    {
+        var client = new TrackingModifyClient();
+        var service = CreateService(client);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Design Review"" Active=""true"">
+            <Steps>
+                <Step Name=""Review"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.ModifyAsync(
+                new WorkflowModifyRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Equal(new[] { "tag", "get", "save", "share", "verify", "untag" }, client.CallSequence);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
+    public async Task ModifyAsync_TrusteeVerificationFailureStillUntags()
+    {
+        var client = new TrackingModifyClient(dropReviewersOnReadback: true);
+        var service = CreateService(client);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Design Review"" Active=""true"">
+            <Steps>
+                <Step Name=""Review"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.ModifyAsync(
+                new WorkflowModifyRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Failed);
+            Assert.Equal(new[] { "tag", "get", "save", "share", "verify", "untag" }, client.CallSequence);
+            Assert.Contains(result.Results, r =>
+                r.Status == WorkflowResultStatus.Fail &&
+                (r.Message ?? string.Empty).Contains("did not persist", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
     private static string CreateTempXmlRaw(string xml)
     {
         var path = Path.Combine(Path.GetTempPath(), $"wf_modify_test_{Guid.NewGuid():N}.xml");
@@ -402,6 +473,115 @@ public class WorkflowServiceModifyTests
                     }
                 }
             };
+        }
+    }
+
+    private sealed class TrackingModifyClient : MockWorkflowApiClient
+    {
+        private WorkflowEditModel? _savedModel;
+        private readonly bool _dropReviewersOnReadback;
+
+        public TrackingModifyClient(bool dropReviewersOnReadback = false)
+        {
+            _dropReviewersOnReadback = dropReviewersOnReadback;
+        }
+
+        public List<string> CallSequence { get; } = new();
+
+        public override Task<WorkflowEditModel> TagAsync(string workflowId, CancellationToken ct = default)
+        {
+            CallSequence.Add("tag");
+            return Task.FromResult(new WorkflowEditModel
+            {
+                BEditable = true,
+                WorkflowDefinition = new WorkflowDefinition
+                {
+                    WorkflowId = workflowId,
+                    Name = "Design Review"
+                },
+                WorkflowStepModels = new List<WorkflowStepModel>
+                {
+                    new()
+                    {
+                        WorkflowStepDefinition = new WorkflowStepDefinition
+                        {
+                            WorkflowId = workflowId,
+                            StepId = "step-001",
+                            Order = 1,
+                            Name = "Review"
+                        }
+                    }
+                }
+            });
+        }
+
+        public override Task<WorkflowEditModel> GetWorkflowAsync(string workflowId, CancellationToken ct = default)
+        {
+            if (_savedModel is null)
+            {
+                CallSequence.Add("get");
+                return Task.FromResult(new WorkflowEditModel
+                {
+                    BEditable = true,
+                    WorkflowDefinition = new WorkflowDefinition
+                    {
+                        WorkflowId = workflowId,
+                        Name = "Design Review"
+                    },
+                    WorkflowStepModels = new List<WorkflowStepModel>
+                    {
+                        new()
+                        {
+                            WorkflowStepDefinition = new WorkflowStepDefinition
+                            {
+                                WorkflowId = workflowId,
+                                StepId = "step-001",
+                                Order = 1,
+                                Name = "Review"
+                            }
+                        }
+                    }
+                });
+            }
+
+            CallSequence.Add("verify");
+            if (!_dropReviewersOnReadback)
+            {
+                return Task.FromResult(_savedModel);
+            }
+
+            return Task.FromResult(new WorkflowEditModel
+            {
+                BEditable = _savedModel.BEditable,
+                WorkflowDefinition = _savedModel.WorkflowDefinition,
+                WorkflowStepModels = _savedModel.WorkflowStepModels.Select(step => new WorkflowStepModel
+                {
+                    BDeleted = step.BDeleted,
+                    WorkflowStepDefinition = step.WorkflowStepDefinition,
+                    WorkflowTrusteeDefinitions = new List<WorkflowTrusteeDefinition>(),
+                    EmailNotificationList = step.EmailNotificationList,
+                    AlertNotificationList = step.AlertNotificationList
+                }).ToList()
+            });
+        }
+
+        public override Task<ApiResult> SaveWorkflowAsync(WorkflowEditModel model, CancellationToken ct = default)
+        {
+            CallSequence.Add("save");
+            _savedModel = model;
+            return Task.FromResult(ApiResult.Success());
+        }
+
+        public override Task<ApiResult> SetWorkflowSharedAsync(string workflowId, bool shared, CancellationToken ct = default)
+        {
+            CallSequence.Add("share");
+            return Task.FromResult(ApiResult.Success());
+        }
+
+        public override Task<ApiResult> UntagAsync(string workflowId, CancellationToken ct = default)
+        {
+            CallSequence.Add("untag");
+            return Task.FromResult(ApiResult.Success());
         }
     }
 }

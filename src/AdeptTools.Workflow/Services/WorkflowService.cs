@@ -244,12 +244,12 @@ public class WorkflowService : IWorkflowService
                 };
             }
 
-            // 6. Untag
-            await _apiClient.UntagAsync(workflowId, ct);
-
-            // 7. Post-save visibility check (same auth/context as this create call)
+            // 6. Post-save visibility check (same auth/context as this create call)
             var (visibleToCurrentContext, ownerDisplay, ownerUserId, shareStatus) =
                 await CheckWorkflowVisibilityAsync(workflowId, input.Name, ct);
+
+            // 7. Release the edit tag after the full create flow completes.
+            await _apiClient.UntagAsync(workflowId, ct);
 
             var totalTrustees = input.Steps.Sum(s => s.Trustees.Count);
             var ownership = string.IsNullOrWhiteSpace(ownerDisplay)
@@ -552,10 +552,10 @@ public class WorkflowService : IWorkflowService
             }
 
             var shareResult = await _apiClient.SetWorkflowSharedAsync(workflowId, input.Shared, ct);
-            await _apiClient.UntagAsync(workflowId, ct);
 
             if (!shareResult.IsSuccess)
             {
+                await _apiClient.UntagAsync(workflowId, ct);
                 return new WorkflowOperationResult
                 {
                     WorkflowName = input.Name,
@@ -567,6 +567,7 @@ public class WorkflowService : IWorkflowService
             var trusteePersistenceError = await ValidateReviewerTrusteePersistenceAsync(input, workflowId, ct);
             if (!string.IsNullOrWhiteSpace(trusteePersistenceError))
             {
+                await _apiClient.UntagAsync(workflowId, ct);
                 return new WorkflowOperationResult
                 {
                     WorkflowName = input.Name,
@@ -574,6 +575,8 @@ public class WorkflowService : IWorkflowService
                     Message = trusteePersistenceError
                 };
             }
+
+            await _apiClient.UntagAsync(workflowId, ct);
 
             var totalTrustees = input.Steps.Sum(s => s.Trustees.Count);
             return new WorkflowOperationResult
