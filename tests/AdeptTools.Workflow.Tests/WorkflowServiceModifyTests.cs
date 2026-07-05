@@ -168,6 +168,100 @@ public class WorkflowServiceModifyTests
     }
 
     [Fact]
+    public async Task ModifyAsync_WhenExcludeWeekendOmitted_RetainsExistingIncludeFlags()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var client = new CapturingModifyClient(
+            savedModels,
+            workflowDefinitionOverride: new WorkflowDefinition
+            {
+                WorkflowId = "wf-001",
+                Name = "Design Review",
+                BTimeoutIncludeSaturday = false,
+                BTimeoutIncludeSunday = true
+            });
+        var service = CreateService(client);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Design Review"" Active=""true"">
+            <Steps>
+                <Step Name=""Review"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.ModifyAsync(
+                new WorkflowModifyRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Single(savedModels);
+
+            var saved = savedModels[0].WorkflowDefinition;
+            Assert.False(saved.BTimeoutIncludeSaturday);
+            Assert.True(saved.BTimeoutIncludeSunday);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
+    public async Task ModifyAsync_WhenExcludeWeekendSpecified_OverwritesIncludeFlags()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var client = new CapturingModifyClient(
+            savedModels,
+            workflowDefinitionOverride: new WorkflowDefinition
+            {
+                WorkflowId = "wf-001",
+                Name = "Design Review",
+                BTimeoutIncludeSaturday = true,
+                BTimeoutIncludeSunday = true
+            });
+        var service = CreateService(client);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Design Review"" Active=""true"" ExcludeSaturday=""true"" ExcludeSunday=""true"">
+            <Steps>
+                <Step Name=""Review"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.ModifyAsync(
+                new WorkflowModifyRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Single(savedModels);
+
+            var saved = savedModels[0].WorkflowDefinition;
+            Assert.False(saved.BTimeoutIncludeSaturday);
+            Assert.False(saved.BTimeoutIncludeSunday);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
     public async Task ModifyAsync_RejectsDuplicateStepNamesInWorkflow()
     {
         var savedModels = new List<WorkflowEditModel>();
@@ -391,11 +485,16 @@ public class WorkflowServiceModifyTests
     {
         protected readonly List<WorkflowEditModel> SavedModels;
         private readonly WorkflowStepModel? _overrideStep;
+        private readonly WorkflowDefinition? _overrideWorkflowDefinition;
 
-        public CapturingModifyClient(List<WorkflowEditModel> saved, WorkflowStepModel? existingStep = null)
+        public CapturingModifyClient(
+            List<WorkflowEditModel> saved,
+            WorkflowStepModel? existingStep = null,
+            WorkflowDefinition? workflowDefinitionOverride = null)
         {
             SavedModels = saved;
             _overrideStep = existingStep;
+            _overrideWorkflowDefinition = workflowDefinitionOverride;
         }
 
         public override Task<WorkflowEditModel> TagAsync(string workflowId, CancellationToken ct = default)
@@ -435,7 +534,7 @@ public class WorkflowServiceModifyTests
             return new WorkflowEditModel
             {
                 BEditable = true,
-                WorkflowDefinition = new WorkflowDefinition
+                WorkflowDefinition = _overrideWorkflowDefinition ?? new WorkflowDefinition
                 {
                     WorkflowId = workflowId,
                     Name = "Design Review"

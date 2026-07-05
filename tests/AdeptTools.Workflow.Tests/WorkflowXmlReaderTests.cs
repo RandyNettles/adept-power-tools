@@ -152,6 +152,72 @@ public class WorkflowXmlReaderTests
         }
     }
 
+    [Fact]
+    public void Read_WorkflowExcludeWeekend_Omitted_RemainsNull()
+    {
+        var xml = @"<AdeptWorkflowConfig>
+  <Workflows>
+    <Workflow Name=""WF"" Active=""true"">
+      <Steps>
+        <Step Name=""Review"">
+          <Trustees>
+            <Trustee Id=""user1"" Type=""User"" />
+          </Trustees>
+        </Step>
+      </Steps>
+    </Workflow>
+  </Workflows>
+</AdeptWorkflowConfig>";
+
+        var path = WriteTempFile(xml);
+
+        try
+        {
+            var result = _reader.Read(path);
+
+            Assert.Single(result.Workflows);
+            Assert.Null(result.Workflows[0].ExcludeSaturday);
+            Assert.Null(result.Workflows[0].ExcludeSunday);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Read_WorkflowExcludeWeekend_Present_ParsesValues()
+    {
+        var xml = @"<AdeptWorkflowConfig>
+  <Workflows>
+    <Workflow Name=""WF"" Active=""true"" ExcludeSaturday=""true"" ExcludeSunday=""false"">
+      <Steps>
+        <Step Name=""Review"">
+          <Trustees>
+            <Trustee Id=""user1"" Type=""User"" />
+          </Trustees>
+        </Step>
+      </Steps>
+    </Workflow>
+  </Workflows>
+</AdeptWorkflowConfig>";
+
+        var path = WriteTempFile(xml);
+
+        try
+        {
+            var result = _reader.Read(path);
+
+            Assert.Single(result.Workflows);
+            Assert.True(result.Workflows[0].ExcludeSaturday);
+            Assert.False(result.Workflows[0].ExcludeSunday);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     private static string WriteTempFile(string content)
     {
         var path = Path.Combine(Path.GetTempPath(), $"xmltest_{Guid.NewGuid():N}.xml");

@@ -17,8 +17,8 @@ public class WorkflowInputModel
     public string? Memo { get; set; }
     public int? TimeoutDays { get; set; }
     public int? RecurringTimeoutDays { get; set; }
-    public bool ExcludeSaturday { get; set; }
-    public bool ExcludeSunday { get; set; }
+    public bool? ExcludeSaturday { get; set; }
+    public bool? ExcludeSunday { get; set; }
     public List<WorkflowInputStep> Steps { get; set; } = new();
 }
 

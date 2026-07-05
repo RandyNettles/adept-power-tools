@@ -52,8 +52,8 @@ public class WorkflowXmlReader
                 Active = ParseBoolAttr(wfElement, "Active", true),
                 Shared = ParseBoolAttr(wfElement, "Shared", false),
                 Memo = GetChildText(wfElement, "Memo"),
-                ExcludeSaturday = ParseBoolAttr(wfElement, "ExcludeSaturday", false),
-                ExcludeSunday = ParseBoolAttr(wfElement, "ExcludeSunday", false)
+                ExcludeSaturday = ParseNullableBoolAttr(wfElement, "ExcludeSaturday"),
+                ExcludeSunday = ParseNullableBoolAttr(wfElement, "ExcludeSunday")
             };
 
             var timeoutText = GetChildText(wfElement, "TimeoutDays");
@@ -128,5 +128,14 @@ public class WorkflowXmlReader
         var value = element.GetAttribute(attrName);
         if (string.IsNullOrEmpty(value)) return defaultValue;
         return bool.TryParse(value, out var result) ? result : defaultValue;
+    }
+
+    private static bool? ParseNullableBoolAttr(XmlElement element, string attrName)
+    {
+        var value = element.GetAttribute(attrName);
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        return bool.TryParse(value, out var result) ? result : null;
     }
 }

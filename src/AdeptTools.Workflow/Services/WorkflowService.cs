@@ -169,8 +169,10 @@ public class WorkflowService : IWorkflowService
                 model.WorkflowDefinition.RecurringTimeout = TimeSpan.FromDays(input.RecurringTimeoutDays.Value).ToString();
             }
 
-            model.WorkflowDefinition.BTimeoutIncludeSaturday = !input.ExcludeSaturday;
-            model.WorkflowDefinition.BTimeoutIncludeSunday = !input.ExcludeSunday;
+            if (input.ExcludeSaturday.HasValue)
+                model.WorkflowDefinition.BTimeoutIncludeSaturday = !input.ExcludeSaturday.Value;
+            if (input.ExcludeSunday.HasValue)
+                model.WorkflowDefinition.BTimeoutIncludeSunday = !input.ExcludeSunday.Value;
 
             // 4. Configure all steps (after final model is stable)
             var duplicateStepNameError = ValidateDistinctStepNames(input);
@@ -500,8 +502,10 @@ public class WorkflowService : IWorkflowService
                 model.WorkflowDefinition.RecurringTimeout = TimeSpan.FromDays(input.RecurringTimeoutDays.Value).ToString();
             }
 
-            model.WorkflowDefinition.BTimeoutIncludeSaturday = !input.ExcludeSaturday;
-            model.WorkflowDefinition.BTimeoutIncludeSunday = !input.ExcludeSunday;
+            if (input.ExcludeSaturday.HasValue)
+                model.WorkflowDefinition.BTimeoutIncludeSaturday = !input.ExcludeSaturday.Value;
+            if (input.ExcludeSunday.HasValue)
+                model.WorkflowDefinition.BTimeoutIncludeSunday = !input.ExcludeSunday.Value;
 
             // Configure all steps (after final model is stable)
             var duplicateStepNameError = ValidateDistinctStepNames(input);
