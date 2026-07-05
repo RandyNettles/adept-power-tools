@@ -218,6 +218,65 @@ public class WorkflowXmlReaderTests
         }
     }
 
+    [Fact]
+    public void Read_XmlTrusteeMissingType_IsSkipped()
+    {
+        var xml = @"<AdeptWorkflowConfig>
+  <Workflows>
+    <Workflow Name=""WF"" Active=""true"">
+      <Steps>
+        <Step Name=""Review""><Trustees><Trustee Id=""user1"" /></Trustees></Step>
+      </Steps>
+    </Workflow>
+  </Workflows>
+</AdeptWorkflowConfig>";
+
+        var path = WriteTempFile(xml);
+
+        try
+        {
+            var result = _reader.Read(path);
+
+            Assert.Single(result.Workflows);
+            Assert.Single(result.Workflows[0].Steps);
+            Assert.Empty(result.Workflows[0].Steps[0].Trustees);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Read_XmlTrusteeMissingRole_DefaultsToReviewer()
+    {
+        var xml = @"<AdeptWorkflowConfig>
+  <Workflows>
+    <Workflow Name=""WF"" Active=""true"">
+      <Steps>
+        <Step Name=""Review""><Trustees><Trustee Id=""user1"" Type=""User"" /></Trustees></Step>
+      </Steps>
+    </Workflow>
+  </Workflows>
+</AdeptWorkflowConfig>";
+
+        var path = WriteTempFile(xml);
+
+        try
+        {
+            var result = _reader.Read(path);
+
+            Assert.Single(result.Workflows);
+            Assert.Single(result.Workflows[0].Steps);
+            Assert.Single(result.Workflows[0].Steps[0].Trustees);
+            Assert.Equal(TrusteeRole.Reviewer, result.Workflows[0].Steps[0].Trustees[0].Role);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
     private static string WriteTempFile(string content)
     {
         var path = Path.Combine(Path.GetTempPath(), $"xmltest_{Guid.NewGuid():N}.xml");

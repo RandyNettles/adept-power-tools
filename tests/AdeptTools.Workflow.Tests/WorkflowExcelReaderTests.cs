@@ -310,6 +310,9 @@ public class WorkflowExcelReaderTests : IDisposable
         Assert.Equal("MyWorkflow", workflow.Name);
         Assert.Equal("Test memo", workflow.Memo);
         Assert.Equal(14, workflow.TimeoutDays);
+        Assert.Null(workflow.RecurringTimeoutDays);
+        Assert.Null(workflow.ExcludeSaturday);
+        Assert.Null(workflow.ExcludeSunday);
         Assert.True(workflow.Active);
         Assert.True(workflow.Shared);
     }
