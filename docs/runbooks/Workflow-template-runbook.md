@@ -71,6 +71,19 @@ Data rows:
 - `Type`: One of `User`, `Group`, `Meta`, or `Email`.
 - `Role`: One of `Reviewer`, `Notify`, or `Alert`.
 
+#### Role Values
+
+| Role | When the trustee is notified | Where it appears in Adept |
+| --- | --- | --- |
+| `Reviewer` | Always — this trustee must act on the step | Reviewer list on the workflow step |
+| `Notify` | When the step is approved or advanced | Email notification list on the workflow step |
+| `Alert` | When the step times out (deadline exceeded) | Alert recipient list on the workflow step (visible only when a timeout is configured) |
+
+Notes:
+- A step can have trustees with different roles simultaneously.
+- `Alert` trustees are escalation recipients for overdue steps. They are only meaningful when the workflow has a `Deadline (days)` value set.
+- A step with no `Reviewer` trustees is allowed but generates a warning.
+
 ### Validation Rules
 The validator currently enforces these core rules:
 - The workbook must contain at least one workflow.
