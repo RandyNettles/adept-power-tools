@@ -144,6 +144,105 @@ public class WorkflowServiceModifyTests
         }
     }
 
+    [Fact]
+    public async Task ModifyAsync_ReorderedExistingSteps_MatchesByNameNotIndex()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var client = new ReorderedExistingStepsClient(savedModels);
+        var service = CreateService(client);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Design Review"" Active=""true"">
+            <Steps>
+                <Step Name=""Draft"">
+                    <Trustees>
+                        <Trustee Id=""draftReviewer"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+                <Step Name=""Approve"">
+                    <Trustees>
+                        <Trustee Id=""approveReviewer"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.ModifyAsync(
+                new WorkflowModifyRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Single(savedModels);
+
+            var saved = savedModels[0];
+            var draftStep = saved.WorkflowStepModels.Single(s => s.WorkflowStepDefinition.StepId == "step-draft");
+            var approveStep = saved.WorkflowStepModels.Single(s => s.WorkflowStepDefinition.StepId == "step-approve");
+
+            Assert.Equal("Draft", draftStep.WorkflowStepDefinition.Name);
+            Assert.Equal("draftReviewer", draftStep.WorkflowTrusteeDefinitions.Single().TrusteeId);
+            Assert.Equal("Approve", approveStep.WorkflowStepDefinition.Name);
+            Assert.Equal("approveReviewer", approveStep.WorkflowTrusteeDefinitions.Single().TrusteeId);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
+    public async Task ModifyAsync_DeletedExistingStep_DoesNotShiftActiveStepMapping()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var client = new DeletedMiddleStepClient(savedModels);
+        var service = CreateService(client);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Design Review"" Active=""true"">
+            <Steps>
+                <Step Name=""Draft"">
+                    <Trustees>
+                        <Trustee Id=""draftReviewer"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+                <Step Name=""Approve"">
+                    <Trustees>
+                        <Trustee Id=""approveReviewer"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.ModifyAsync(
+                new WorkflowModifyRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Single(savedModels);
+
+            var saved = savedModels[0];
+            var draftStep = saved.WorkflowStepModels.Single(s => s.WorkflowStepDefinition.StepId == "step-draft");
+            var deletedStep = saved.WorkflowStepModels.Single(s => s.WorkflowStepDefinition.StepId == "step-old");
+            var approveStep = saved.WorkflowStepModels.Single(s => s.WorkflowStepDefinition.StepId == "step-approve");
+
+            Assert.Equal("draftReviewer", draftStep.WorkflowTrusteeDefinitions.Single().TrusteeId);
+            Assert.Empty(deletedStep.WorkflowTrusteeDefinitions);
+            Assert.True(deletedStep.BDeleted);
+            Assert.Equal("approveReviewer", approveStep.WorkflowTrusteeDefinitions.Single().TrusteeId);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
     private static string CreateTempXmlRaw(string xml)
     {
         var path = Path.Combine(Path.GetTempPath(), $"wf_modify_test_{Guid.NewGuid():N}.xml");
@@ -153,48 +252,32 @@ public class WorkflowServiceModifyTests
 
     private class CapturingModifyClient : MockWorkflowApiClient
     {
-        private readonly List<WorkflowEditModel> _saved;
+        protected readonly List<WorkflowEditModel> SavedModels;
 
         public CapturingModifyClient(List<WorkflowEditModel> saved)
         {
-            _saved = saved;
+            SavedModels = saved;
         }
 
         public override Task<WorkflowEditModel> TagAsync(string workflowId, CancellationToken ct = default)
         {
-            return Task.FromResult(new WorkflowEditModel
-            {
-                BEditable = true,
-                WorkflowDefinition = new WorkflowDefinition
-                {
-                    WorkflowId = workflowId,
-                    Name = "Design Review"
-                },
-                WorkflowStepModels = new List<WorkflowStepModel>
-                {
-                    new()
-                    {
-                        WorkflowStepDefinition = new WorkflowStepDefinition
-                        {
-                            WorkflowId = workflowId,
-                            StepId = "step-001",
-                            Order = 1,
-                            Name = "Step 1"
-                        }
-                    }
-                }
-            });
+            return Task.FromResult(BuildInitialWorkflow(workflowId));
         }
 
         public override Task<WorkflowEditModel> GetWorkflowAsync(string workflowId, CancellationToken ct = default)
         {
-            var existing = _saved.LastOrDefault(m =>
+            var existing = SavedModels.LastOrDefault(m =>
                 string.Equals(m.WorkflowDefinition.WorkflowId, workflowId, StringComparison.OrdinalIgnoreCase));
 
             if (existing is not null)
                 return Task.FromResult(existing);
 
-            return Task.FromResult(new WorkflowEditModel
+            return Task.FromResult(BuildInitialWorkflow(workflowId));
+        }
+
+        protected virtual WorkflowEditModel BuildInitialWorkflow(string workflowId)
+        {
+            return new WorkflowEditModel
             {
                 BEditable = true,
                 WorkflowDefinition = new WorkflowDefinition
@@ -211,17 +294,114 @@ public class WorkflowServiceModifyTests
                             WorkflowId = workflowId,
                             StepId = "step-001",
                             Order = 1,
-                            Name = "Step 1"
+                            Name = "Review"
                         }
                     }
                 }
-            });
+            };
         }
 
         public override Task<ApiResult> SaveWorkflowAsync(WorkflowEditModel model, CancellationToken ct = default)
         {
-            _saved.Add(model);
+            SavedModels.Add(model);
             return Task.FromResult(ApiResult.Success("Captured."));
+        }
+    }
+
+    private sealed class ReorderedExistingStepsClient : CapturingModifyClient
+    {
+        public ReorderedExistingStepsClient(List<WorkflowEditModel> saved) : base(saved)
+        {
+        }
+
+        protected override WorkflowEditModel BuildInitialWorkflow(string workflowId)
+        {
+            return new WorkflowEditModel
+            {
+                BEditable = true,
+                WorkflowDefinition = new WorkflowDefinition
+                {
+                    WorkflowId = workflowId,
+                    Name = "Design Review"
+                },
+                WorkflowStepModels = new List<WorkflowStepModel>
+                {
+                    new()
+                    {
+                        WorkflowStepDefinition = new WorkflowStepDefinition
+                        {
+                            WorkflowId = workflowId,
+                            StepId = "step-approve",
+                            Order = 2,
+                            Name = "Approve"
+                        }
+                    },
+                    new()
+                    {
+                        WorkflowStepDefinition = new WorkflowStepDefinition
+                        {
+                            WorkflowId = workflowId,
+                            StepId = "step-draft",
+                            Order = 1,
+                            Name = "Draft"
+                        }
+                    }
+                }
+            };
+        }
+    }
+
+    private sealed class DeletedMiddleStepClient : CapturingModifyClient
+    {
+        public DeletedMiddleStepClient(List<WorkflowEditModel> saved) : base(saved)
+        {
+        }
+
+        protected override WorkflowEditModel BuildInitialWorkflow(string workflowId)
+        {
+            return new WorkflowEditModel
+            {
+                BEditable = true,
+                WorkflowDefinition = new WorkflowDefinition
+                {
+                    WorkflowId = workflowId,
+                    Name = "Design Review"
+                },
+                WorkflowStepModels = new List<WorkflowStepModel>
+                {
+                    new()
+                    {
+                        WorkflowStepDefinition = new WorkflowStepDefinition
+                        {
+                            WorkflowId = workflowId,
+                            StepId = "step-draft",
+                            Order = 1,
+                            Name = "Draft"
+                        }
+                    },
+                    new()
+                    {
+                        BDeleted = true,
+                        WorkflowStepDefinition = new WorkflowStepDefinition
+                        {
+                            WorkflowId = workflowId,
+                            StepId = "step-old",
+                            Order = 2,
+                            Name = "Obsolete"
+                        }
+                    },
+                    new()
+                    {
+                        WorkflowStepDefinition = new WorkflowStepDefinition
+                        {
+                            WorkflowId = workflowId,
+                            StepId = "step-approve",
+                            Order = 3,
+                            Name = "Approve"
+                        }
+                    }
+                }
+            };
         }
     }
 }

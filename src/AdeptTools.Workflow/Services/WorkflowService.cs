@@ -414,11 +414,74 @@ public class WorkflowService : IWorkflowService
             // Get current state
             var model = await _apiClient.GetWorkflowAsync(workflowId, ct);
 
-            // Add new steps if input has more (each call re-reads the model,
-            // so we must add all steps before configuring any)
-            for (int s = model.WorkflowStepModels.Count; s < input.Steps.Count; s++)
+            // AWC treats structural step operations as full-model replacement boundaries.
+            // For modify, existing steps must be correlated by durable identity semantics,
+            // not by raw array index, because deleted/reordered server steps can shift positions.
+            var existingActiveSteps = model.WorkflowStepModels
+                .Where(s => !s.BDeleted)
+                .ToList();
+            var matchedStepIndexes = new HashSet<int>();
+            var orderedStepModels = new List<WorkflowStepModel>();
+            var newInputSteps = new List<WorkflowInputStep>();
+
+            foreach (var inputStep in input.Steps)
+            {
+                var normalizedName = NormalizeStepName(inputStep.Name);
+                var matchedIndex = -1;
+                for (int existingIndex = 0; existingIndex < existingActiveSteps.Count; existingIndex++)
+                {
+                    if (matchedStepIndexes.Contains(existingIndex))
+                        continue;
+
+                    if (string.Equals(
+                        NormalizeStepName(existingActiveSteps[existingIndex].WorkflowStepDefinition.Name),
+                        normalizedName,
+                        StringComparison.OrdinalIgnoreCase))
+                    {
+                        matchedIndex = existingIndex;
+                        break;
+                    }
+                }
+
+                if (matchedIndex >= 0)
+                {
+                    matchedStepIndexes.Add(matchedIndex);
+                    orderedStepModels.Add(existingActiveSteps[matchedIndex]);
+                }
+                else
+                {
+                    newInputSteps.Add(inputStep);
+                }
+            }
+
+            // Add new steps if input has more unmatched steps (each call re-reads the model,
+            // so we must add all steps before configuring any local mutations).
+            for (int s = 0; s < newInputSteps.Count; s++)
             {
                 model = await _apiClient.AddStepAsync(model, -1, ct);
+            }
+
+            if (newInputSteps.Count > 0)
+            {
+                var refreshedActiveSteps = model.WorkflowStepModels
+                    .Where(s => !s.BDeleted)
+                    .ToList();
+
+                if (refreshedActiveSteps.Count < orderedStepModels.Count + newInputSteps.Count)
+                {
+                    await _apiClient.UntagAsync(workflowId, ct);
+                    return new WorkflowOperationResult
+                    {
+                        WorkflowName = input.Name,
+                        Status = WorkflowResultStatus.Fail,
+                        Message = $"{input.Name}: server returned fewer active steps than expected after AddStep."
+                    };
+                }
+
+                orderedStepModels = refreshedActiveSteps
+                    .Take(orderedStepModels.Count)
+                    .Concat(refreshedActiveSteps.Skip(refreshedActiveSteps.Count - newInputSteps.Count))
+                    .ToList();
             }
 
             // Apply workflow-level properties (after AddStepAsync re-reads)
@@ -454,9 +517,9 @@ public class WorkflowService : IWorkflowService
                 };
             }
 
-            for (int s = 0; s < input.Steps.Count && s < model.WorkflowStepModels.Count; s++)
+            for (int s = 0; s < input.Steps.Count && s < orderedStepModels.Count; s++)
             {
-                var notificationValidationError = ConfigureStep(model.WorkflowStepModels[s], input.Steps[s], workflowId);
+                var notificationValidationError = ConfigureStep(orderedStepModels[s], input.Steps[s], workflowId);
                 if (!string.IsNullOrWhiteSpace(notificationValidationError))
                 {
                     await _apiClient.UntagAsync(workflowId, ct);
@@ -805,6 +868,11 @@ public class WorkflowService : IWorkflowService
         }
 
         return null;
+    }
+
+    private static string NormalizeStepName(string? name)
+    {
+        return name?.Trim() ?? string.Empty;
     }
 
     private static bool IsValidReviewerTrusteeType(WorkflowUserType type)
