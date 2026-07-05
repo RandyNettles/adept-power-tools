@@ -398,6 +398,132 @@ public class WorkflowServiceCreateTests
         }
     }
 
+    [Fact]
+    public async Task CreateAsync_RejectsInvalidReviewerTrusteeType()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var capturingClient = new CapturingSaveClient(savedModels);
+        var service = CreateService(capturingClient);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Invalid Reviewer Type WF"" Active=""true"">
+            <Steps>
+                <Step Name=""Review Step"">
+                    <Trustees>
+                        <Trustee Id=""reviewers@company.com"" Type=""Email"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.CreateAsync(
+                new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Failed);
+            Assert.Empty(savedModels);
+            Assert.Contains(result.Results, r =>
+                r.Status == WorkflowResultStatus.Fail &&
+                (r.Message ?? string.Empty).Contains("reviewer trustee type", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
+    public async Task CreateAsync_DeduplicatesStepNotificationRecipients()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var capturingClient = new CapturingSaveClient(savedModels);
+        var service = CreateService(capturingClient);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Dedup Notify WF"" Active=""true"">
+            <Steps>
+                <Step Name=""Review Step"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                        <Trustee Id=""notifyUser"" Type=""User"" Role=""Notify"" />
+                        <Trustee Id=""notifyUser"" Type=""User"" Role=""Notify"" />
+                        <Trustee Id=""alerts@company.com"" Type=""Email"" Role=""Alert"" />
+                        <Trustee Id=""alerts@company.com"" Type=""Email"" Role=""Alert"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.CreateAsync(
+                new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Single(savedModels);
+
+            var step = savedModels[0].WorkflowStepModels[0];
+            Assert.Single(step.EmailNotificationList);
+            Assert.Single(step.AlertNotificationList);
+            Assert.Equal(WorkflowNotificationAction.Approve, step.EmailNotificationList[0].Action);
+            Assert.Equal(WorkflowNotificationAction.Timeout, step.AlertNotificationList[0].Action);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
+    public async Task CreateAsync_RejectsDuplicateStepNamesInWorkflow()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var capturingClient = new CapturingSaveClient(savedModels);
+        var service = CreateService(capturingClient);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Duplicate Steps WF"" Active=""true"">
+            <Steps>
+                <Step Name=""Review"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+                <Step Name="" review "">
+                    <Trustees>
+                        <Trustee Id=""notifyUser"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.CreateAsync(
+                new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Failed);
+            Assert.Empty(savedModels);
+            Assert.Contains(result.Results, r =>
+                r.Status == WorkflowResultStatus.Fail &&
+                (r.Message ?? string.Empty).Contains("duplicate step name", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
         [Fact]
         public async Task CreateAsync_PropagatesWorkflowSharedFlag_ToSavedModel()
         {

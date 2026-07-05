@@ -173,6 +173,18 @@ public class WorkflowService : IWorkflowService
             model.WorkflowDefinition.BTimeoutIncludeSunday = !input.ExcludeSunday;
 
             // 4. Configure all steps (after final model is stable)
+            var duplicateStepNameError = ValidateDistinctStepNames(input);
+            if (!string.IsNullOrWhiteSpace(duplicateStepNameError))
+            {
+                await TryUntagAsync(workflowId, ct);
+                return new WorkflowOperationResult
+                {
+                    WorkflowName = input.Name,
+                    Status = WorkflowResultStatus.Fail,
+                    Message = duplicateStepNameError
+                };
+            }
+
             for (int s = 0; s < input.Steps.Count && s < model.WorkflowStepModels.Count; s++)
             {
                 var notificationValidationError = ConfigureStep(model.WorkflowStepModels[s], input.Steps[s], workflowId);
@@ -430,6 +442,18 @@ public class WorkflowService : IWorkflowService
             model.WorkflowDefinition.BTimeoutIncludeSunday = !input.ExcludeSunday;
 
             // Configure all steps (after final model is stable)
+            var duplicateStepNameError = ValidateDistinctStepNames(input);
+            if (!string.IsNullOrWhiteSpace(duplicateStepNameError))
+            {
+                await _apiClient.UntagAsync(workflowId, ct);
+                return new WorkflowOperationResult
+                {
+                    WorkflowName = input.Name,
+                    Status = WorkflowResultStatus.Fail,
+                    Message = duplicateStepNameError
+                };
+            }
+
             for (int s = 0; s < input.Steps.Count && s < model.WorkflowStepModels.Count; s++)
             {
                 var notificationValidationError = ConfigureStep(model.WorkflowStepModels[s], input.Steps[s], workflowId);
@@ -725,16 +749,23 @@ public class WorkflowService : IWorkflowService
 
     private static string? ConfigureStep(WorkflowStepModel stepModel, WorkflowInputStep input, string workflowId)
     {
-        stepModel.WorkflowStepDefinition.Name = input.Name;
+        stepModel.WorkflowStepDefinition.Name = input.Name?.Trim() ?? string.Empty;
         stepModel.WorkflowStepDefinition.RequiredApprovalsCount = input.RequiredApprovalsCount;
         stepModel.WorkflowStepDefinition.AutoAdvance = input.AutoAdvance;
 
         var stepId = stepModel.WorkflowStepDefinition.StepId;
 
         // Split trustees by role
-        var reviewers = input.Trustees.Where(t => t.Role == TrusteeRole.Reviewer);
-        var emailNotify = input.Trustees.Where(t => t.Role == TrusteeRole.EmailNotify);
-        var alertNotify = input.Trustees.Where(t => t.Role == TrusteeRole.AlertNotify);
+        var reviewers = input.Trustees.Where(t => t.Role == TrusteeRole.Reviewer).ToList();
+        var emailNotify = input.Trustees.Where(t => t.Role == TrusteeRole.EmailNotify).ToList();
+        var alertNotify = input.Trustees.Where(t => t.Role == TrusteeRole.AlertNotify).ToList();
+
+        var invalidReviewer = reviewers.FirstOrDefault(t => !IsValidReviewerTrusteeType(t.TrusteeType));
+        if (invalidReviewer is not null)
+        {
+            return $"Step '{stepModel.WorkflowStepDefinition.Name}': reviewer trustee type '{invalidReviewer.TrusteeType}' is invalid. " +
+                   "Reviewer trustees must be User, Group, or Key.";
+        }
 
         stepModel.WorkflowTrusteeDefinitions = reviewers.Select(t => new WorkflowTrusteeDefinition
         {
@@ -776,6 +807,13 @@ public class WorkflowService : IWorkflowService
         return null;
     }
 
+    private static bool IsValidReviewerTrusteeType(WorkflowUserType type)
+    {
+        return type == WorkflowUserType.User
+               || type == WorkflowUserType.Group
+               || type == WorkflowUserType.Key;
+    }
+
     private static string NormalizeNotificationTrusteeId(WorkflowInputTrustee trustee)
     {
         if (trustee.TrusteeType == WorkflowUserType.Approvers)
@@ -793,6 +831,7 @@ public class WorkflowService : IWorkflowService
     {
         invalidCount = 0;
         var notifications = new List<WorkflowNotificationDefinition>();
+        var seenRecipients = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var trustee in trustees)
         {
@@ -802,6 +841,13 @@ public class WorkflowService : IWorkflowService
                 invalidCount++;
                 continue;
             }
+
+            var recipientKey = trustee.TrusteeType == WorkflowUserType.Email
+                ? $"E:{normalizedId.Trim()}"
+                : $"{(int)trustee.TrusteeType}:{normalizedId.Trim()}";
+
+            if (!seenRecipients.Add(recipientKey))
+                continue;
 
             notifications.Add(new WorkflowNotificationDefinition
             {
@@ -818,6 +864,20 @@ public class WorkflowService : IWorkflowService
         }
 
         return notifications;
+    }
+
+    private static string? ValidateDistinctStepNames(WorkflowInputModel input)
+    {
+        var duplicate = input.Steps
+            .Select(s => s.Name?.Trim() ?? string.Empty)
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .GroupBy(n => n, StringComparer.OrdinalIgnoreCase)
+            .FirstOrDefault(g => g.Count() > 1);
+
+        if (duplicate is null)
+            return null;
+
+        return $"Workflow '{input.Name}': duplicate step name '{duplicate.Key}' is not allowed.";
     }
 
     private static bool IsValidNotificationTrustee(WorkflowUserType type, string trusteeId)
