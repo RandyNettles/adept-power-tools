@@ -380,12 +380,25 @@ public class HttpWorkflowApiClient : IWorkflowApiClient
                     ? userId
                     : legacy.UserName;
 
-                merged[userId] = new AdeptUserEntry
+                // If the primary users list already has this user (keyed by login name),
+                // preserve its NotificationTargetId (GUID) — do not overwrite with login name.
+                // AWC's usersCache is keyed by user.id (GUID), so the stored trusteeId must
+                // be a GUID for loadCurrentRecipients() to resolve the trustee for display.
+                if (merged.TryGetValue(userId, out var existing))
                 {
-                    UserId = userId,
-                    DisplayName = displayName,
-                    NotificationTargetId = userId
-                };
+                    if (string.IsNullOrWhiteSpace(existing.DisplayName))
+                        existing.DisplayName = displayName;
+                    // NotificationTargetId from primary (GUID) is preserved as-is.
+                }
+                else
+                {
+                    merged[userId] = new AdeptUserEntry
+                    {
+                        UserId = userId,
+                        DisplayName = displayName,
+                        NotificationTargetId = userId
+                    };
+                }
             }
 
             return merged.Values.ToList();
