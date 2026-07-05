@@ -20,6 +20,12 @@ public class ComWorkflowApiClient : IWorkflowApiClient
     private readonly ComSessionManager? _sessionManager;
     private readonly AdeptToolSettings? _settings;
     private readonly LegacyComFeatureFlags _flags;
+    public WorkflowApiCapabilities Capabilities { get; } = new()
+    {
+        SupportsShareMutation = false,
+        SupportsUserDirectoryLookup = false,
+        SupportsGroupDirectoryLookup = false
+    };
 
     public ComWorkflowApiClient(
         ILegacyCoreApiSession legacySession,

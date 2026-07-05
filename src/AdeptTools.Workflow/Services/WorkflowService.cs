@@ -157,6 +157,20 @@ public class WorkflowService : IWorkflowService
             model.WorkflowDefinition.Shared = input.Shared;
             model.WorkflowDefinition.Memo = input.Memo;
 
+            var shareCapabilityError = ValidateShareMutationCapability(
+                currentSharedState: false,
+                desiredSharedState: input.Shared);
+            if (!string.IsNullOrWhiteSpace(shareCapabilityError))
+            {
+                await TryUntagAsync(workflowId, ct);
+                return new WorkflowOperationResult
+                {
+                    WorkflowName = input.Name,
+                    Status = WorkflowResultStatus.Fail,
+                    Message = shareCapabilityError
+                };
+            }
+
             if (input.TimeoutDays.HasValue)
             {
                 model.WorkflowDefinition.BTimeoutOn = true;
@@ -220,16 +234,19 @@ public class WorkflowService : IWorkflowService
                 };
             }
 
-            var shareResult = await _apiClient.SetWorkflowSharedAsync(workflowId, input.Shared, ct);
-            if (!shareResult.IsSuccess)
+            if (_apiClient.Capabilities.SupportsShareMutation)
             {
-                await TryUntagAsync(workflowId, ct);
-                return new WorkflowOperationResult
+                var shareResult = await _apiClient.SetWorkflowSharedAsync(workflowId, input.Shared, ct);
+                if (!shareResult.IsSuccess)
                 {
-                    WorkflowName = input.Name,
-                    Status = WorkflowResultStatus.Fail,
-                    Message = FormatApiFailure("Failed to apply workflow share state.", shareResult)
-                };
+                    await TryUntagAsync(workflowId, ct);
+                    return new WorkflowOperationResult
+                    {
+                        WorkflowName = input.Name,
+                        Status = WorkflowResultStatus.Fail,
+                        Message = FormatApiFailure("Failed to apply workflow share state.", shareResult)
+                    };
+                }
             }
 
             // Guard: fail creation if reviewer trustees were dropped during persistence.
@@ -275,12 +292,7 @@ public class WorkflowService : IWorkflowService
             if (workflowId is not null)
                 await TryUntagAsync(workflowId, ct);
 
-            return new WorkflowOperationResult
-            {
-                WorkflowName = input.Name,
-                Status = WorkflowResultStatus.Fail,
-                Message = $"{ex.GetType().Name}: {ex.Message} | {ex.StackTrace}"
-            };
+            return CreateUnexpectedFailureResult(input.Name, ex);
         }
     }
 
@@ -432,6 +444,7 @@ public class WorkflowService : IWorkflowService
 
             // Get current state
             var model = await _apiClient.GetWorkflowAsync(workflowId, ct);
+            var originalSharedState = model.WorkflowDefinition.Shared;
 
             // AWC treats structural step operations as full-model replacement boundaries.
             // For modify, existing steps must be correlated by durable identity semantics,
@@ -508,6 +521,18 @@ public class WorkflowService : IWorkflowService
             model.WorkflowDefinition.Shared = input.Shared;
             model.WorkflowDefinition.Memo = input.Memo;
 
+            var shareCapabilityError = ValidateShareMutationCapability(originalSharedState, input.Shared);
+            if (!string.IsNullOrWhiteSpace(shareCapabilityError))
+            {
+                await _apiClient.UntagAsync(workflowId, ct);
+                return new WorkflowOperationResult
+                {
+                    WorkflowName = input.Name,
+                    Status = WorkflowResultStatus.Fail,
+                    Message = shareCapabilityError
+                };
+            }
+
             if (input.TimeoutDays.HasValue)
             {
                 model.WorkflowDefinition.BTimeoutOn = true;
@@ -571,17 +596,20 @@ public class WorkflowService : IWorkflowService
                 };
             }
 
-            var shareResult = await _apiClient.SetWorkflowSharedAsync(workflowId, input.Shared, ct);
-
-            if (!shareResult.IsSuccess)
+            if (_apiClient.Capabilities.SupportsShareMutation && originalSharedState != input.Shared)
             {
-                await _apiClient.UntagAsync(workflowId, ct);
-                return new WorkflowOperationResult
+                var shareResult = await _apiClient.SetWorkflowSharedAsync(workflowId, input.Shared, ct);
+
+                if (!shareResult.IsSuccess)
                 {
-                    WorkflowName = input.Name,
-                    Status = WorkflowResultStatus.Fail,
-                    Message = FormatApiFailure("Failed to apply workflow share state.", shareResult)
-                };
+                    await _apiClient.UntagAsync(workflowId, ct);
+                    return new WorkflowOperationResult
+                    {
+                        WorkflowName = input.Name,
+                        Status = WorkflowResultStatus.Fail,
+                        Message = FormatApiFailure("Failed to apply workflow share state.", shareResult)
+                    };
+                }
             }
 
             var trusteePersistenceError = await ValidateReviewerTrusteePersistenceAsync(input, workflowId, ct);
@@ -622,12 +650,7 @@ public class WorkflowService : IWorkflowService
         catch (Exception ex)
         {
             await TryUntagAsync(workflowId, ct);
-            return new WorkflowOperationResult
-            {
-                WorkflowName = input.Name,
-                Status = WorkflowResultStatus.Fail,
-                Message = $"{ex.GetType().Name}: {ex.Message} | {ex.StackTrace}"
-            };
+            return CreateUnexpectedFailureResult(input.Name, ex);
         }
     }
 
@@ -740,12 +763,7 @@ public class WorkflowService : IWorkflowService
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    result = new WorkflowOperationResult
-                    {
-                        WorkflowName = wf.WorkflowName,
-                        Status = WorkflowResultStatus.Fail,
-                        Message = $"{ex.GetType().Name}: {ex.Message} | {ex.StackTrace}"
-                    };
+                    result = CreateUnexpectedFailureResult(wf.WorkflowName, ex);
                 }
 
                 lock (batch)
@@ -1139,32 +1157,35 @@ public class WorkflowService : IWorkflowService
         var userAliasCache = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         var userDirectoryAliases = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
 
-        try
+        if (_apiClient.Capabilities.SupportsUserDirectoryLookup)
         {
-            var users = await _apiClient.GetUsersAsync(ct);
-            foreach (var user in users)
+            try
             {
-                var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var users = await _apiClient.GetUsersAsync(ct);
+                foreach (var user in users)
+                {
+                    var aliases = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-                if (!string.IsNullOrWhiteSpace(user.UserId))
-                    aliases.Add(user.UserId.Trim().ToUpperInvariant());
+                    if (!string.IsNullOrWhiteSpace(user.UserId))
+                        aliases.Add(user.UserId.Trim().ToUpperInvariant());
 
-                if (!string.IsNullOrWhiteSpace(user.NotificationTargetId))
-                    aliases.Add(user.NotificationTargetId.Trim().ToUpperInvariant());
+                    if (!string.IsNullOrWhiteSpace(user.NotificationTargetId))
+                        aliases.Add(user.NotificationTargetId.Trim().ToUpperInvariant());
 
-                if (aliases.Count == 0)
-                    continue;
+                    if (aliases.Count == 0)
+                        continue;
 
-                if (!string.IsNullOrWhiteSpace(user.UserId))
-                    userDirectoryAliases[user.UserId.Trim()] = new HashSet<string>(aliases, StringComparer.OrdinalIgnoreCase);
+                    if (!string.IsNullOrWhiteSpace(user.UserId))
+                        userDirectoryAliases[user.UserId.Trim()] = new HashSet<string>(aliases, StringComparer.OrdinalIgnoreCase);
 
-                if (!string.IsNullOrWhiteSpace(user.NotificationTargetId))
-                    userDirectoryAliases[user.NotificationTargetId.Trim()] = new HashSet<string>(aliases, StringComparer.OrdinalIgnoreCase);
+                    if (!string.IsNullOrWhiteSpace(user.NotificationTargetId))
+                        userDirectoryAliases[user.NotificationTargetId.Trim()] = new HashSet<string>(aliases, StringComparer.OrdinalIgnoreCase);
+                }
             }
-        }
-        catch (Exception ex) when (ex is HttpRequestException || ex is NotSupportedException)
-        {
-            // Best effort only; fallback lookup path below handles partial environments.
+            catch (Exception ex) when (ex is HttpRequestException || ex is NotSupportedException)
+            {
+                // Best effort only; fallback lookup path below handles partial environments.
+            }
         }
 
         async Task<HashSet<string>> ResolveAliasesAsync((string Id, WorkflowUserType Type) item)
@@ -1195,21 +1216,24 @@ public class WorkflowService : IWorkflowService
                 key.ToUpperInvariant()
             };
 
-            try
+            if (_apiClient.Capabilities.SupportsUserDirectoryLookup)
             {
-                var user = await _apiClient.GetUserByIdAsync(key, ct);
-                if (user is not null)
+                try
                 {
-                    if (!string.IsNullOrWhiteSpace(user.UserId))
-                        aliases.Add(user.UserId.Trim().ToUpperInvariant());
+                    var user = await _apiClient.GetUserByIdAsync(key, ct);
+                    if (user is not null)
+                    {
+                        if (!string.IsNullOrWhiteSpace(user.UserId))
+                            aliases.Add(user.UserId.Trim().ToUpperInvariant());
 
-                    if (!string.IsNullOrWhiteSpace(user.NotificationTargetId))
-                        aliases.Add(user.NotificationTargetId.Trim().ToUpperInvariant());
+                        if (!string.IsNullOrWhiteSpace(user.NotificationTargetId))
+                            aliases.Add(user.NotificationTargetId.Trim().ToUpperInvariant());
+                    }
                 }
-            }
-            catch (Exception ex) when (ex is HttpRequestException || ex is NotSupportedException)
-            {
-                // Best effort only; if lookup is unavailable, compare raw IDs.
+                catch (Exception ex) when (ex is HttpRequestException || ex is NotSupportedException)
+                {
+                    // Best effort only; if lookup is unavailable, compare raw IDs.
+                }
             }
 
             userAliasCache[key] = aliases;
@@ -1258,6 +1282,33 @@ public class WorkflowService : IWorkflowService
         if (userTrustees.Count == 0)
         {
             result.AllResolved = true;
+            return result;
+        }
+
+        if (!_apiClient.Capabilities.SupportsUserDirectoryLookup)
+        {
+            var trusteesNeedingLookup = userTrustees
+                .Where(x => RequiresUserResolution(x.Trustee.TrusteeId))
+                .ToList();
+
+            if (trusteesNeedingLookup.Count == 0)
+            {
+                result.AllResolved = true;
+                return result;
+            }
+
+            foreach (var entry in trusteesNeedingLookup)
+            {
+                result.Failures.Add(new TrusteeResolutionFailure
+                {
+                    WorkflowName = entry.Workflow.Name,
+                    Message = $"Trustee \"{entry.Trustee.TrusteeId}\" in step \"{entry.Step.Name}\": " +
+                              "the selected backend does not support user directory lookup/name resolution. " +
+                              "Provide the exact Adept user ID/login name or use the HTTP backend."
+                });
+            }
+
+            result.AllResolved = false;
             return result;
         }
 
@@ -1338,18 +1389,24 @@ public class WorkflowService : IWorkflowService
             }
 
             // Some servers expose canonical notification target IDs only on per-user lookup.
-            try
+            if (_apiClient.Capabilities.SupportsUserDirectoryLookup)
             {
-                var verified = await _apiClient.GetUserByIdAsync(resolvedUserId, ct);
-                var verifiedId = ToPersistedUserTrusteeId(verified, fromDirectory);
-                canonicalUserTargetCache[resolvedUserId] = verifiedId;
-                return verifiedId;
+                try
+                {
+                    var verified = await _apiClient.GetUserByIdAsync(resolvedUserId, ct);
+                    var verifiedId = ToPersistedUserTrusteeId(verified, fromDirectory);
+                    canonicalUserTargetCache[resolvedUserId] = verifiedId;
+                    return verifiedId;
+                }
+                catch (Exception ex) when (ex is HttpRequestException || ex is NotSupportedException)
+                {
+                    canonicalUserTargetCache[resolvedUserId] = fromDirectory;
+                    return fromDirectory;
+                }
             }
-            catch (Exception ex) when (ex is HttpRequestException || ex is NotSupportedException)
-            {
-                canonicalUserTargetCache[resolvedUserId] = fromDirectory;
-                return fromDirectory;
-            }
+
+            canonicalUserTargetCache[resolvedUserId] = fromDirectory;
+            return fromDirectory;
         }
 
         foreach (var entry in userTrustees)
@@ -1393,12 +1450,15 @@ public class WorkflowService : IWorkflowService
                     {
                         // Some environments return incomplete user lists from lookup endpoints.
                         // Verify directly by user ID if possible, then persist canonical target ID.
-                        var verified = await _apiClient.GetUserByIdAsync(entry.Trustee.TrusteeId, ct);
-                        if (verified is not null && !string.IsNullOrWhiteSpace(verified.UserId))
+                        if (_apiClient.Capabilities.SupportsUserDirectoryLookup)
                         {
-                            entry.Trustee.TrusteeId = ToPersistedUserTrusteeId(verified, verified.UserId);
+                            var verified = await _apiClient.GetUserByIdAsync(entry.Trustee.TrusteeId, ct);
+                            if (verified is not null && !string.IsNullOrWhiteSpace(verified.UserId))
+                            {
+                                entry.Trustee.TrusteeId = ToPersistedUserTrusteeId(verified, verified.UserId);
 
-                            break;
+                                break;
+                            }
                         }
 
                         // If direct verification is unavailable or blocked, allow token-like IDs
@@ -1460,6 +1520,23 @@ public class WorkflowService : IWorkflowService
         if (groupTrustees.Count == 0)
         {
             result.IsValid = true;
+            return result;
+        }
+
+        if (!_apiClient.Capabilities.SupportsGroupDirectoryLookup)
+        {
+            foreach (var entry in groupTrustees)
+            {
+                result.Failures.Add(new TrusteeResolutionFailure
+                {
+                    WorkflowName = entry.Workflow.Name,
+                    Message = $"Trustee \"{entry.Trustee.TrusteeId}\" in step \"{entry.Step.Name}\": " +
+                              "the selected backend does not support group directory validation. " +
+                              "Provide a verified Adept group ID or use the HTTP backend."
+                });
+            }
+
+            result.IsValid = false;
             return result;
         }
 
@@ -1697,6 +1774,32 @@ public class WorkflowService : IWorkflowService
         return details.Count == 0
             ? fallbackMessage
             : $"{fallbackMessage} {string.Join(" | ", details)}";
+    }
+
+    private string? ValidateShareMutationCapability(bool currentSharedState, bool desiredSharedState)
+    {
+        if (_apiClient.Capabilities.SupportsShareMutation)
+            return null;
+
+        if (currentSharedState == desiredSharedState)
+            return null;
+
+        return "The selected backend does not support workflow share-state changes. Use the HTTP backend for share/unshare operations.";
+    }
+
+    private static WorkflowOperationResult CreateUnexpectedFailureResult(string workflowName, Exception ex)
+    {
+        var summary = string.IsNullOrWhiteSpace(ex.Message)
+            ? ex.GetType().Name
+            : $"{ex.GetType().Name}: {ex.Message}";
+
+        return new WorkflowOperationResult
+        {
+            WorkflowName = workflowName,
+            Status = WorkflowResultStatus.Fail,
+            Message = summary,
+            Details = ex.ToString()
+        };
     }
 
     private class GroupTrusteeValidationResult

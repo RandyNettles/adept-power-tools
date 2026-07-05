@@ -153,7 +153,7 @@ public static class WorkflowCommands
 
             Console.WriteLine();
             Console.WriteLine($"  Summary: {result.Total} total, {result.Succeeded} succeeded, {result.Failed} failed, {result.Skipped} skipped");
-            WriteDetailedOperationResults(result, includeSuccess: true);
+            WriteDetailedOperationResults(result, settings.Verbose, includeSuccess: true);
 
             context.ExitCode = result.Failed > 0 ? 1 : 0;
         });
@@ -227,7 +227,7 @@ public static class WorkflowCommands
 
             Console.WriteLine();
             Console.WriteLine($"  Summary: {result.Total} total, {result.Succeeded} succeeded, {result.Failed} failed, {result.Skipped} skipped");
-            WriteDetailedOperationResults(result);
+            WriteDetailedOperationResults(result, settings.Verbose);
 
             context.ExitCode = result.Failed > 0 ? 1 : 0;
         });
@@ -378,6 +378,7 @@ public static class WorkflowCommands
 
             Console.WriteLine();
             Console.WriteLine($"  Summary: {result.Total} total, {result.Succeeded} deleted, {result.Failed} failed, {result.Skipped} skipped");
+            WriteDetailedOperationResults(result, settings.Verbose);
 
             if (manifest is not null)
                 Console.WriteLine($"  Manifest saved to: {manifest}");
@@ -395,7 +396,7 @@ public static class WorkflowCommands
         return null;
     }
 
-    private static void WriteDetailedOperationResults(WorkflowBatchResult result, bool includeSuccess = false)
+    private static void WriteDetailedOperationResults(WorkflowBatchResult result, bool verbose, bool includeSuccess = false)
     {
         if (result.Results.Count == 0)
             return;
@@ -418,6 +419,15 @@ public static class WorkflowCommands
 
             var workflowName = string.IsNullOrWhiteSpace(item.WorkflowName) ? "Unknown" : item.WorkflowName;
             Console.WriteLine($"  {statusLabel} {workflowName}: {item.Message}");
+
+            if (verbose && !string.IsNullOrWhiteSpace(item.Details))
+            {
+                foreach (var line in item.Details.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None))
+                {
+                    if (!string.IsNullOrWhiteSpace(line))
+                        Console.WriteLine($"         {line}");
+                }
+            }
         }
     }
 }

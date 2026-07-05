@@ -6,6 +6,7 @@ namespace AdeptTools.Workflow.Api;
 
 public interface IWorkflowApiClient
 {
+    WorkflowApiCapabilities Capabilities { get; }
     Task<WorkflowSetup> GetSetupAsync(CancellationToken ct = default);
     Task<WorkflowAdminPacket> GetWorkflowsAsync(CancellationToken ct = default);
     Task<WorkflowAdminPacket> GetWorkflowsBasicAsync(CancellationToken ct = default);

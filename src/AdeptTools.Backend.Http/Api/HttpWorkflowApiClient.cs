@@ -14,6 +14,7 @@ public class HttpWorkflowApiClient : IWorkflowApiClient
 {
     private readonly HttpClient _httpClient;
     private readonly IAdeptAuthService? _authService;
+    public WorkflowApiCapabilities Capabilities { get; } = WorkflowApiCapabilities.Full;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true

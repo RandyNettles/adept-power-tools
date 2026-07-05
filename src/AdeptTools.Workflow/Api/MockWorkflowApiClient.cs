@@ -8,6 +8,8 @@ public class MockWorkflowApiClient : IWorkflowApiClient
 {
     private readonly Dictionary<string, WorkflowEditModel> _savedWorkflows = new(StringComparer.OrdinalIgnoreCase);
 
+    public virtual WorkflowApiCapabilities Capabilities => WorkflowApiCapabilities.Full;
+
     public virtual Task<WorkflowSetup> GetSetupAsync(CancellationToken ct = default)
     {
         return Task.FromResult(new WorkflowSetup

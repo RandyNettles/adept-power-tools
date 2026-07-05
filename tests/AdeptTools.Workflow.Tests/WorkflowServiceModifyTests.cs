@@ -496,7 +496,7 @@ public class WorkflowServiceModifyTests
                 new WorkflowModifyRequest { InputFilePath = xmlPath, DryRun = false });
 
             Assert.Equal(1, result.Succeeded);
-            Assert.Equal(new[] { "visibility", "tag", "get", "save", "share", "verify", "visibility", "untag" }, client.CallSequence);
+            Assert.Equal(new[] { "visibility", "tag", "get", "save", "verify", "visibility", "untag" }, client.CallSequence);
         }
         finally
         {
@@ -530,7 +530,7 @@ public class WorkflowServiceModifyTests
                 new WorkflowModifyRequest { InputFilePath = xmlPath, DryRun = false });
 
             Assert.Equal(1, result.Failed);
-            Assert.Equal(new[] { "visibility", "tag", "get", "save", "share", "verify", "untag" }, client.CallSequence);
+            Assert.Equal(new[] { "visibility", "tag", "get", "save", "verify", "untag" }, client.CallSequence);
             Assert.Contains(result.Results, r =>
                 r.Status == WorkflowResultStatus.Fail &&
                 (r.Message ?? string.Empty).Contains("did not persist", StringComparison.OrdinalIgnoreCase));
@@ -572,6 +572,43 @@ public class WorkflowServiceModifyTests
                 && (r.Message ?? string.Empty).Contains("owner: Jane Owner", StringComparison.Ordinal)
                 && (r.Message ?? string.Empty).Contains("shared: shared", StringComparison.Ordinal)
                 && (r.Message ?? string.Empty).Contains("share-status: Shared", StringComparison.Ordinal));
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
+    public async Task ModifyAsync_ComLikeBackend_RejectsShareStateMutationClearly()
+    {
+        var client = new ComLikeModifyClient(initialSharedState: false);
+        var service = CreateService(client);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Design Review"" Active=""true"" Shared=""true"">
+            <Steps>
+                <Step Name=""Review"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.ModifyAsync(
+                new WorkflowModifyRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Failed);
+            Assert.Contains(result.Results, r =>
+                r.Status == WorkflowResultStatus.Fail &&
+                (r.Message ?? string.Empty).Contains("does not support workflow share-state changes", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain("share", client.CallSequence);
         }
         finally
         {
@@ -864,6 +901,98 @@ public class WorkflowServiceModifyTests
         {
             CallSequence.Add("save");
             _savedModel = model;
+            return Task.FromResult(ApiResult.Success());
+        }
+
+        public override Task<ApiResult> SetWorkflowSharedAsync(string workflowId, bool shared, CancellationToken ct = default)
+        {
+            CallSequence.Add("share");
+            return Task.FromResult(ApiResult.Success());
+        }
+
+        public override Task<ApiResult> UntagAsync(string workflowId, CancellationToken ct = default)
+        {
+            CallSequence.Add("untag");
+            return Task.FromResult(ApiResult.Success());
+        }
+    }
+
+    private sealed class ComLikeModifyClient : MockWorkflowApiClient
+    {
+        private readonly bool _initialSharedState;
+        public List<string> CallSequence { get; } = new();
+
+        public ComLikeModifyClient(bool initialSharedState)
+        {
+            _initialSharedState = initialSharedState;
+        }
+
+        public override WorkflowApiCapabilities Capabilities => new()
+        {
+            SupportsShareMutation = false,
+            SupportsUserDirectoryLookup = true,
+            SupportsGroupDirectoryLookup = true
+        };
+
+        public override Task<WorkflowEditModel> TagAsync(string workflowId, CancellationToken ct = default)
+        {
+            CallSequence.Add("tag");
+            return Task.FromResult(new WorkflowEditModel
+            {
+                BEditable = true,
+                WorkflowDefinition = new WorkflowDefinition
+                {
+                    WorkflowId = workflowId,
+                    Name = "Design Review",
+                    Shared = _initialSharedState
+                },
+                WorkflowStepModels = new List<WorkflowStepModel>
+                {
+                    new()
+                    {
+                        WorkflowStepDefinition = new WorkflowStepDefinition
+                        {
+                            WorkflowId = workflowId,
+                            StepId = "step-001",
+                            Order = 1,
+                            Name = "Review"
+                        }
+                    }
+                }
+            });
+        }
+
+        public override Task<WorkflowEditModel> GetWorkflowAsync(string workflowId, CancellationToken ct = default)
+        {
+            CallSequence.Add("get");
+            return Task.FromResult(new WorkflowEditModel
+            {
+                BEditable = true,
+                WorkflowDefinition = new WorkflowDefinition
+                {
+                    WorkflowId = workflowId,
+                    Name = "Design Review",
+                    Shared = _initialSharedState
+                },
+                WorkflowStepModels = new List<WorkflowStepModel>
+                {
+                    new()
+                    {
+                        WorkflowStepDefinition = new WorkflowStepDefinition
+                        {
+                            WorkflowId = workflowId,
+                            StepId = "step-001",
+                            Order = 1,
+                            Name = "Review"
+                        }
+                    }
+                }
+            });
+        }
+
+        public override Task<ApiResult> SaveWorkflowAsync(WorkflowEditModel model, CancellationToken ct = default)
+        {
+            CallSequence.Add("save");
             return Task.FromResult(ApiResult.Success());
         }
 

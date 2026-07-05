@@ -350,4 +350,50 @@ public class WorkflowServiceDeleteTests
         Assert.Equal(0, trackingClient.GetWorkflowsCallCount - callCountBefore);
         Assert.True(result.Succeeded > 0);
     }
+
+    [Fact]
+    public async Task DeleteAsync_UnexpectedException_StoresSummaryAndVerboseDetailsSeparately()
+    {
+        var client = new ThrowingDeleteMockClient();
+        var service = CreateService(client);
+
+        var result = await service.DeleteAsync(new WorkflowDeleteRequest
+        {
+            Filter = "*",
+            Force = true
+        });
+
+        Assert.Equal(1, result.Failed);
+        var failure = Assert.Single(result.Results);
+        Assert.Equal("InvalidOperationException: simulated delete failure", failure.Message);
+        Assert.DoesNotContain(" at ", failure.Message ?? string.Empty, StringComparison.Ordinal);
+        Assert.NotNull(failure.Details);
+        Assert.Contains("System.InvalidOperationException: simulated delete failure", failure.Details, StringComparison.Ordinal);
+    }
+
+    private sealed class ThrowingDeleteMockClient : MockWorkflowApiClient
+    {
+        public override Task<WorkflowAdminPacket> GetWorkflowsAsync(CancellationToken ct = default)
+        {
+            return Task.FromResult(new WorkflowAdminPacket
+            {
+                CurrentUserId = "MOCK_USER",
+                Workflows = new List<WorkflowAdminItem>
+                {
+                    new()
+                    {
+                        WorkflowId = "wf-throw",
+                        WorkflowName = "Throwing WF",
+                        Active = true,
+                        Delete = true
+                    }
+                }
+            });
+        }
+
+        public override Task<ApiResult> DeleteWorkflowAsync(string workflowId, CancellationToken ct = default)
+        {
+            throw new InvalidOperationException("simulated delete failure");
+        }
+    }
 }

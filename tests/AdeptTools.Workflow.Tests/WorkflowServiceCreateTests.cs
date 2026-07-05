@@ -713,6 +713,95 @@ public class WorkflowServiceCreateTests
         }
     }
 
+    [Fact]
+    public async Task CreateAsync_ComLikeBackend_RejectsShareStateMutationClearly()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var client = new CapabilityLimitedClient(savedModels)
+        {
+            ShareMutationSupported = false,
+            UserDirectoryLookupSupported = true,
+            GroupDirectoryLookupSupported = true
+        };
+        var service = CreateService(client);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Shared WF"" Active=""true"" Shared=""true"">
+            <Steps>
+                <Step Name=""Review Step"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.CreateAsync(
+                new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Failed);
+            Assert.Contains(result.Results, r =>
+                r.Status == WorkflowResultStatus.Fail &&
+                (r.Message ?? string.Empty).Contains("does not support workflow share-state changes", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
+    public async Task CreateAsync_ComLikeBackend_AllowsExactLoginIdsWithoutDirectoryLookup()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var client = new CapabilityLimitedClient(savedModels)
+        {
+            ShareMutationSupported = true,
+            UserDirectoryLookupSupported = false,
+            GroupDirectoryLookupSupported = false
+        };
+        var service = CreateService(client);
+
+        var xmlPath = CreateTempXmlWithRoles(new[]
+        {
+            new WorkflowInputModel
+            {
+                Name = "COM Safe WF",
+                Active = true,
+                Steps = new List<WorkflowInputStep>
+                {
+                    new()
+                    {
+                        Name = "Review",
+                        Trustees = new List<WorkflowInputTrustee>
+                        {
+                            new() { TrusteeId = "reviewer1", TrusteeType = WorkflowUserType.User, Role = TrusteeRole.Reviewer }
+                        }
+                    }
+                }
+            }
+        });
+
+        try
+        {
+            var result = await service.CreateAsync(
+                new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Single(savedModels);
+            Assert.Equal("reviewer1", savedModels[0].WorkflowStepModels[0].WorkflowTrusteeDefinitions[0].TrusteeId);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
     // --- helpers ---
 
     private static WorkflowInputModel CreateSampleInput(string name, string[] stepNames)
@@ -905,6 +994,49 @@ public class WorkflowServiceCreateTests
             {
                 new() { UserId = "reviewer1", DisplayName = "Reviewer, First" }
             });
+        }
+    }
+
+    private sealed class CapabilityLimitedClient : CapturingSaveClient
+    {
+        public CapabilityLimitedClient(List<WorkflowEditModel> saved)
+            : base(saved)
+        {
+        }
+
+        public bool ShareMutationSupported { get; init; }
+        public bool UserDirectoryLookupSupported { get; init; }
+        public bool GroupDirectoryLookupSupported { get; init; }
+
+        public override WorkflowApiCapabilities Capabilities => new()
+        {
+            SupportsShareMutation = ShareMutationSupported,
+            SupportsUserDirectoryLookup = UserDirectoryLookupSupported,
+            SupportsGroupDirectoryLookup = GroupDirectoryLookupSupported
+        };
+
+        public override Task<List<AdeptUserEntry>> GetUsersAsync(CancellationToken ct = default)
+        {
+            if (!UserDirectoryLookupSupported)
+                throw new NotSupportedException("User directory lookup disabled for this backend.");
+
+            return base.GetUsersAsync(ct);
+        }
+
+        public override Task<AdeptUserEntry?> GetUserByIdAsync(string userId, CancellationToken ct = default)
+        {
+            if (!UserDirectoryLookupSupported)
+                throw new NotSupportedException("User directory lookup disabled for this backend.");
+
+            return base.GetUserByIdAsync(userId, ct);
+        }
+
+        public override Task<List<AdeptGroupEntry>> GetGroupsAsync(CancellationToken ct = default)
+        {
+            if (!GroupDirectoryLookupSupported)
+                throw new NotSupportedException("Group directory lookup disabled for this backend.");
+
+            return base.GetGroupsAsync(ct);
         }
     }
 }

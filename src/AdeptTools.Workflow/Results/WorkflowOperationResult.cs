@@ -12,6 +12,7 @@ public class WorkflowOperationResult
     public required string WorkflowName { get; init; }
     public WorkflowResultStatus Status { get; init; }
     public string? Message { get; init; }
+    public string? Details { get; init; }
     public int StepCount { get; init; }
     public int TrusteeCount { get; init; }
 }

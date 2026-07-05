@@ -5,6 +5,8 @@ using AdeptTools.Cli.Commands;
 using AdeptTools.Cli.Infrastructure;
 using AdeptTools.Core.Configuration;
 using AdeptTools.Core.Models;
+using AdeptTools.Workflow.Results;
+using AdeptTools.Workflow.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -186,5 +188,78 @@ public class AuthCommandTests
             if (File.Exists(manifestPath))
                 File.Delete(manifestPath);
         }
+    }
+
+    [Fact]
+    public void WorkflowDelete_Failure_ShowsVerboseDetailsOnlyWithVerboseFlag()
+    {
+        var service = new FailingWorkflowService();
+        var concise = RenderDetailedResults(service, verbose: false);
+        var verbose = RenderDetailedResults(service, verbose: true);
+
+        Assert.Contains("[FAIL] Demo WF: Delete failed.", concise);
+        Assert.DoesNotContain("System.InvalidOperationException", concise);
+
+        Assert.Contains("[FAIL] Demo WF: Delete failed.", verbose);
+        Assert.Contains("System.InvalidOperationException: boom", verbose);
+        Assert.Contains("at Demo.Frame()", verbose);
+    }
+
+    private static string RenderDetailedResults(IWorkflowService service, bool verbose)
+    {
+        var originalOut = Console.Out;
+        using var writer = new StringWriter();
+        Console.SetOut(writer);
+
+        try
+        {
+            var result = service.DeleteAsync(new WorkflowDeleteRequest
+            {
+                Filter = "*",
+                Force = true
+            }).GetAwaiter().GetResult();
+
+            var method = typeof(WorkflowCommands).GetMethod("WriteDetailedOperationResults",
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static);
+
+            Assert.NotNull(method);
+            method!.Invoke(null, new object[] { result, verbose, false });
+            return writer.ToString();
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+    }
+
+    private sealed class FailingWorkflowService : IWorkflowService
+    {
+        public Task<WorkflowBatchResult> CreateAsync(WorkflowCreateRequest request, IProgress<WorkflowProgress>? progress = null, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<WorkflowBatchResult> ModifyAsync(WorkflowModifyRequest request, IProgress<WorkflowProgress>? progress = null, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public Task<WorkflowBatchResult> DeleteAsync(WorkflowDeleteRequest request, IProgress<WorkflowProgress>? progress = null, CancellationToken ct = default)
+        {
+            return Task.FromResult(new WorkflowBatchResult
+            {
+                Total = 1,
+                Failed = 1,
+                Results = new List<WorkflowOperationResult>
+                {
+                    new()
+                    {
+                        WorkflowName = "Demo WF",
+                        Status = WorkflowResultStatus.Fail,
+                        Message = "Delete failed.",
+                        Details = "System.InvalidOperationException: boom\n   at Demo.Frame()"
+                    }
+                }
+            });
+        }
+
+        public Task<WorkflowListResult> ListAsync(WorkflowListRequest request, CancellationToken ct = default)
+            => throw new NotSupportedException();
     }
 }
