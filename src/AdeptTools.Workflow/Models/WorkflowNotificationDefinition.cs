@@ -9,10 +9,18 @@ public enum WorkflowNotificationAction
 
 public class WorkflowNotificationDefinition
 {
+    private string _trusteeId = string.Empty;
+    private string? _targetId;
+
     public string NotificationId { get; set; } = string.Empty;
     public string WorkflowId { get; set; } = string.Empty;
     public string StepId { get; set; } = string.Empty;
-    public string TrusteeId { get; set; } = string.Empty;
+    public string TrusteeId
+    {
+        get => !string.IsNullOrWhiteSpace(_trusteeId) ? _trusteeId : (_targetId ?? string.Empty);
+        set => _trusteeId = value ?? string.Empty;
+    }
+
     public WorkflowUserType Type { get; set; }
     public int Flags { get; set; }
     public WorkflowNotificationAction Action { get; set; } = WorkflowNotificationAction.Undefined;
@@ -25,10 +33,16 @@ public class WorkflowNotificationDefinition
         set => Type = value;
     }
 
-    public string TargetId
+    public string? TargetId
     {
-        get => TrusteeId;
-        set => TrusteeId = value;
+        get => _targetId ?? (!string.IsNullOrWhiteSpace(_trusteeId) ? _trusteeId : null);
+        set
+        {
+            _targetId = value;
+            // Preserve backward compatibility for paths that still read TrusteeId.
+            if (string.IsNullOrWhiteSpace(_trusteeId) && !string.IsNullOrWhiteSpace(value))
+                _trusteeId = value;
+        }
     }
 
     public string WorkflowObjectId

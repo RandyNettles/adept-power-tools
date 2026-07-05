@@ -193,7 +193,7 @@ public class WorkflowServiceCreateTests
     }
 
     [Fact]
-        public async Task CreateAsync_WithApproversNotify_UsesSentinelTargetId()
+        public async Task CreateAsync_WithApproversNotify_UsesNullTargetId()
     {
         var savedModels = new List<WorkflowEditModel>();
         var capturingClient = new CapturingSaveClient(savedModels);
@@ -224,7 +224,8 @@ public class WorkflowServiceCreateTests
 
             var step = savedModels[0].WorkflowStepModels[0];
             Assert.Single(step.EmailNotificationList);
-            Assert.Equal(WorkflowParticipantConstants.ApproversSentinelTargetId, step.EmailNotificationList[0].TrusteeId);
+            Assert.Null(step.EmailNotificationList[0].TargetId);
+            Assert.Equal(string.Empty, step.EmailNotificationList[0].TrusteeId);
             Assert.Equal(WorkflowUserType.Approvers, step.EmailNotificationList[0].Type);
         }
         finally

@@ -817,7 +817,7 @@ public class WorkflowService : IWorkflowService
     private static string NormalizeNotificationTrusteeId(WorkflowInputTrustee trustee)
     {
         if (trustee.TrusteeType == WorkflowUserType.Approvers)
-            return WorkflowParticipantConstants.ApproversSentinelTargetId;
+            return string.Empty;
 
         return trustee.TrusteeId?.Trim() ?? string.Empty;
     }
@@ -844,7 +844,9 @@ public class WorkflowService : IWorkflowService
 
             var recipientKey = trustee.TrusteeType == WorkflowUserType.Email
                 ? $"E:{normalizedId.Trim()}"
-                : $"{(int)trustee.TrusteeType}:{normalizedId.Trim()}";
+                : trustee.TrusteeType == WorkflowUserType.Approvers
+                    ? $"{(int)trustee.TrusteeType}"
+                    : $"{(int)trustee.TrusteeType}:{normalizedId.Trim()}";
 
             if (!seenRecipients.Add(recipientKey))
                 continue;
@@ -854,10 +856,14 @@ public class WorkflowService : IWorkflowService
                 WorkflowId = workflowId,
                 StepId = stepId,
                 WorkflowObjectId = stepId,
-                TrusteeId = normalizedId,
+                TrusteeId = trustee.TrusteeType == WorkflowUserType.Approvers
+                    ? string.Empty
+                    : normalizedId,
                 Type = trustee.TrusteeType,
                 Action = action,
-                TargetId = normalizedId,
+                TargetId = trustee.TrusteeType == WorkflowUserType.Approvers
+                    ? null
+                    : normalizedId,
                 TargetType = trustee.TrusteeType,
                 Email = trustee.TrusteeType == WorkflowUserType.Email ? normalizedId : string.Empty
             });
@@ -882,11 +888,11 @@ public class WorkflowService : IWorkflowService
 
     private static bool IsValidNotificationTrustee(WorkflowUserType type, string trusteeId)
     {
-        if (string.IsNullOrWhiteSpace(trusteeId))
-            return false;
-
         if (type == WorkflowUserType.Approvers)
             return true;
+
+        if (string.IsNullOrWhiteSpace(trusteeId))
+            return false;
 
         if (type == WorkflowUserType.Email)
             return trusteeId.Contains('@', StringComparison.Ordinal) && !trusteeId.EndsWith("@", StringComparison.Ordinal);
