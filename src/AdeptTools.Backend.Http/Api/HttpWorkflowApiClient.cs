@@ -186,6 +186,32 @@ public class HttpWorkflowApiClient : IWorkflowApiClient
             await EnsureSuccessOrThrowAsync(primaryResponse, primaryEndpoint, ct);
         }
 
+        // Secondary: non-admin user list (AWC uses this endpoint; it has the full user set
+        // including users absent from the legacy EmailList endpoint).
+        var secondaryEndpoint = "api/user/users";
+        attempted.Add(secondaryEndpoint);
+        var secondaryResponse = await GetAsyncWithAuthRefreshAsync(secondaryEndpoint, ct);
+        if (secondaryResponse.IsSuccessStatusCode)
+        {
+            var mappedUsers = await ReadPrimaryUsersAsync(secondaryResponse.Content, ct);
+            var mergedUsers = await MergeWithLegacyUsersAsync(mappedUsers, ct);
+
+            if (mergedUsers.Count > 0)
+            {
+                return mergedUsers;
+            }
+
+            if (mappedUsers.Count > 0)
+            {
+                return mappedUsers;
+            }
+        }
+
+        if (secondaryResponse.StatusCode != HttpStatusCode.NotFound)
+        {
+            await EnsureSuccessOrThrowAsync(secondaryResponse, secondaryEndpoint, ct);
+        }
+
         var legacyEndpoint = "api/Account/UserInfo/EmailList";
         attempted.Add(legacyEndpoint);
         var legacyResponse = await GetAsyncWithAuthRefreshAsync(legacyEndpoint, ct);
