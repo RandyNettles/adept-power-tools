@@ -6,6 +6,10 @@ This TDN defines the authoritative save boundary and canonicalization contract f
 
 It consolidates the behavior that is currently spread across workflow congruence and hardening notes into one implementation contract.
 
+This TDN also makes mode and surface boundaries explicit:
+- backend modes: HTTP, COM, Mock
+- product surfaces: CLI and Client
+
 ## Scope
 
 In scope:
@@ -19,6 +23,97 @@ Out of scope:
 - Import pipeline contracts.
 - Delete/list contracts not tied to save boundary semantics.
 
+## Boundary Model
+
+This TDN has two contract layers.
+
+### Layer 1: Shared save-boundary and canonicalization contract
+
+Applies to:
+- All backend modes: HTTP, COM, Mock.
+- Both product surfaces: CLI and Client.
+
+Defines:
+- What constitutes the authoritative save boundary.
+- What is considered canonical state after save.
+- Which post-save verifications are mandatory.
+- Which failures are blocking versus warning-level.
+
+Does not define:
+- Exact transport signature.
+- Exact UI workflow authoring flow.
+- Mode-specific persistence mechanics beyond preserving the same semantic contract.
+
+### Layer 2: Mode and surface realization
+
+Applies to:
+- Mode-specific persistence and reload behavior.
+- CLI and Client orchestration/presentation behavior.
+
+Defines:
+- Where HTTP/COM/Mock realization differs.
+- Where CLI and Client may differ in interaction style.
+
+Does not redefine:
+- The save-boundary contract itself.
+- The meaning of canonicalization success or failure.
+
+## Mode Boundaries (HTTP, COM, Mock)
+
+### HTTP mode
+
+HTTP mode is the primary current ATP implementation surface for full-snapshot save behavior.
+
+HTTP-specific characteristics:
+- Save boundary is expressed through `WorkflowEditModel` construction and one save call.
+- HTTP-specific transient retry behavior may apply during save.
+- Canonical read-back is performed through post-save reload from backend service calls.
+
+Boundary rule:
+- HTTP-specific transport and retry details may differ, but they must preserve the same save-boundary and canonicalization semantics.
+
+### COM mode
+
+COM mode realizes the same contract through native/Desktop edit-session and `Update()` commit behavior.
+
+COM-specific characteristics:
+- Save boundary is the in-memory workflow graph at `Update()` time.
+- Native write-back side effects participate in canonical post-save state.
+
+Boundary rule:
+- COM/native realization may differ from HTTP transport mechanics, but it must preserve the same semantic save boundary, canonical truth rule, and fail-fast behavior.
+
+### Mock mode
+
+Mock mode is a deterministic simulation path for save/canonicalization behavior.
+
+Mock-specific characteristics:
+- May simulate persistence success, mismatch, warning, and verification paths.
+
+Boundary rule:
+- Mock mode must simulate the same save-boundary, canonicalization, and verification semantics and must not silently convert contract failures into success.
+
+## Surface Boundaries (CLI and Client)
+
+### CLI surface
+
+CLI owns command-driven orchestration and textual reporting of save/canonicalization outcomes.
+
+CLI contract:
+- Must preserve the same semantic save boundary, verification ordering, and warning/failure distinctions.
+- May surface summaries and diagnostics in script-friendly form.
+
+### Client surface
+
+Client owns interactive workflow authoring orchestration and presentation of save/canonicalization-sensitive outcomes.
+
+Client contract:
+- Must preserve the same semantic save boundary, verification ordering, and warning/failure distinctions.
+- May use richer progress or apply UX without changing the underlying contract.
+
+Boundary rule:
+- Surface differences may affect interaction style, but not the meaning of save success, canonical read-back, or persistence mismatch failure.
+
 ## COM Path (11.4.5)
 
 Adept 11.4.5 admin workflow persistence uses native/Desktop edit-session and object-graph write-back semantics:
@@ -29,7 +124,14 @@ Adept 11.4.5 admin workflow persistence uses native/Desktop edit-session and obj
 11.4.5-specific implication:
 - The save boundary is still a full object-graph commit boundary even though it is not expressed as one HTTP `WorkflowEditModel` POST.
 
+Mode/surface implication:
+- COM-path evidence qualifies native/Desktop realization; it does not replace the shared save-boundary/canonicalization contract both CLI and Client must preserve.
+
 ## Authoritative Save Boundary
+
+Shared-contract boundary:
+- The save-boundary rules below are semantic requirements shared across modes and both surfaces.
+- Mode-specific notes qualify mechanism, not contract meaning.
 
 Workflow create and modify are full-snapshot authoring operations.
 
@@ -48,6 +150,9 @@ Implication:
 
 ## Canonicalization Rules
 
+Shared-contract boundary:
+- The canonicalization rules below are semantic requirements shared across modes and both surfaces.
+
 ### Rule 1: Server response is canonical after save
 
 After save succeeds, persistence checks use a fresh GetWorkflow read.
@@ -65,7 +170,13 @@ Step configuration maps input steps to active server steps using deterministic o
 Authored fields are actively driven to input intent, including both setting and clearing paths.
 No implicit preserve-on-omit behavior is assumed for authored lists/flags inside the save boundary.
 
+Mode boundary:
+- Full-replace semantics are shared even when the concrete persistence mechanism differs between HTTP JSON save and COM object-graph commit.
+
 ## List Ownership Contract
+
+Shared-contract boundary:
+- Notification list ownership rules below are semantic requirements shared across modes and both surfaces.
 
 ### Step-level notification lists are authoritative for step notifications
 
@@ -86,7 +197,13 @@ Rationale:
 2. Weekend include flags are only overwritten when explicit weekend intent is present.
 3. BDoEmailNotify is explicitly recomputed from step notification presence so full-replace authoring does not retain stale server state.
 
+Mode/surface boundary:
+- Modes and surfaces may differ in implementation path, but not in the congruence outcome that authored timeout/email flags must reflect declared intent.
+
 ## Create/Modify Persistence Verification Contract
+
+Shared-contract boundary:
+- Verification ordering and failure behavior below are semantic requirements shared across modes and both surfaces.
 
 After save, verification runs in this order:
 1. Reviewer trustee persistence verification by step.
@@ -98,13 +215,22 @@ If reviewer or notification verification fails:
 - Message includes missing persisted recipients context.
 - Tag release is attempted best-effort before returning.
 
+Surface boundary:
+- CLI and Client may surface verification failures differently, but not reinterpret them as success.
+
 ## Share Mutation Contract at Save Boundary
 
 1. If backend supports share mutation, share intent is applied as part of create/modify flow.
 2. If backend does not support share mutation and share change is requested, operation fails fast with explicit capability guidance.
 3. Missing container metadata required for share mutation is treated as hard failure.
 
+Mode boundary:
+- Share mutation support is mode-dependent, but the fail-fast contract for unsupported or invalid share mutation is shared.
+
 ## Tag/Untag Contract
+
+Shared-contract boundary:
+- Cleanup rules below are semantic guarantees shared across modes and both surfaces.
 
 1. Save path assumes tagged edit ownership for the target workflow.
 2. On all failure exits after tag acquisition, untag is attempted.
@@ -112,6 +238,9 @@ If reviewer or notification verification fails:
 4. Untag behavior is best-effort for cleanup and must not hide primary failure cause.
 
 ## Error Policy
+
+Shared-contract boundary:
+- Error/warning distinctions below are semantic requirements shared across modes and both surfaces.
 
 Hard errors:
 - Validation failures.
@@ -124,6 +253,9 @@ Hard errors:
 Warnings:
 - Visibility mismatch after save in current list context.
 - Untag warning when save succeeded but lock release could not be confirmed.
+
+Surface/mode boundary:
+- CLI and Client may present these outcomes differently, and HTTP/COM/Mock may encounter them through different mechanisms, but the hard-error-versus-warning distinction is shared.
 
 ## Mode Notes (HTTP, COM, Mock)
 
@@ -152,6 +284,14 @@ Observed native write path specifics to preserve in third-client parity work:
 - Must preserve the same contract shape for verification order and fail/success semantics.
 - May simulate persistence mismatch paths for test coverage of contract failures.
 - Must not silently convert contract failures into success.
+
+## Surface/Mode Separation Checklist
+
+1. Does HTTP preserve the same save-boundary and canonical read-back semantics while using full edit-model snapshot transport?
+2. Does COM/native preserve the same semantic contract through `Update()` object-graph commit and native write-back side effects?
+3. Does Mock simulate verification failure, warning, and cleanup semantics rather than bypassing them?
+4. Do CLI and Client preserve the same semantic distinction between save success, warning, and persistence mismatch failure even if their UX differs?
+5. Are mode-specific transport/write mechanics kept distinct from the shared save-boundary and canonicalization contract itself?
 
 ## Invariants
 

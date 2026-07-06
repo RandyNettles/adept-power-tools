@@ -10,6 +10,10 @@ It specifically governs:
 - Notification recipient identity fidelity.
 - Acceptable matching and aliasing behavior.
 
+This TDN also makes mode and surface boundaries explicit:
+- backend modes: HTTP, COM, Mock
+- product surfaces: CLI and Client
+
 ## Scope
 
 In scope:
@@ -23,6 +27,95 @@ Out of scope:
 - Share/container mutation details (covered elsewhere).
 - Delete/list filtering behavior.
 
+## Boundary Model
+
+This TDN has two contract layers.
+
+### Layer 1: Shared identity and mapping invariant contract
+
+Applies to:
+- All backend modes: HTTP, COM, Mock.
+- Both product surfaces: CLI and Client.
+
+Defines:
+- The non-negotiable identity and mapping invariants.
+- Acceptable and unacceptable matching behavior.
+- Failure conditions when those invariants are violated.
+
+Does not define:
+- Exact adapter mechanics.
+- Exact UI picker behavior.
+- Mode-specific transport or storage details beyond preserving the same invariants.
+
+### Layer 2: Mode and surface realization
+
+Applies to:
+- Mode-specific persistence and identity-resolution behavior.
+- CLI and Client orchestration/presentation behavior.
+
+Defines:
+- Where HTTP/COM/Mock realization differs.
+- Where CLI and Client may differ in interaction style.
+
+Does not redefine:
+- The invariant set itself.
+- The failure meaning when invariants are violated.
+
+## Mode Boundaries (HTTP, COM, Mock)
+
+### HTTP mode
+
+HTTP mode is the primary current ATP implementation surface for persisted identity congruence with AWC-facing behavior.
+
+HTTP-specific characteristics:
+- User-directory-backed alias resolution may be available.
+- HTTP/AWC identity expectations strongly influence canonical persisted user-id form.
+
+Boundary rule:
+- HTTP-specific identity lookup or save mechanics may differ, but they must preserve the same non-negotiable identity invariants defined in this TDN.
+
+### COM mode
+
+COM mode must preserve the same invariants through native/Desktop object-graph and write-back behavior.
+
+COM-specific characteristics:
+- Native persistence writes trustee and notification identities through WF/WFTR/NOTIFY object-graph commit paths.
+- Some HTTP-specific helper capabilities may not exist.
+
+Boundary rule:
+- COM/native realization may differ in mechanism, but it must not weaken the invariant set or silently downgrade identity failure conditions.
+
+### Mock mode
+
+Mock mode is a deterministic simulation path for identity and mapping behavior.
+
+Mock-specific characteristics:
+- May emulate persistence verification and mismatch scenarios for testability.
+
+Boundary rule:
+- Mock success must still respect the same identity invariants and must not simulate away invariant violations as success.
+
+## Surface Boundaries (CLI and Client)
+
+### CLI surface
+
+CLI owns command-driven execution and textual reporting of identity/mapping failures.
+
+CLI contract:
+- Must preserve the same invariant set and failure semantics.
+- May surface diagnostics and missing-identity detail in script-friendly form.
+
+### Client surface
+
+Client owns interactive workflow authoring orchestration and presentation of identity-sensitive outcomes.
+
+Client contract:
+- Must preserve the same invariant set and failure semantics.
+- May present richer picker/review UX without changing the meaning of identity success or failure.
+
+Boundary rule:
+- Surface differences may affect interaction style, but not the meaning of identity congruence or invariant violation.
+
 ## COM Path (11.4.5)
 
 For Adept 11.4.5, these invariants must also hold on the native Desktop/Core admin route:
@@ -33,7 +126,14 @@ For Adept 11.4.5, these invariants must also hold on the native Desktop/Core adm
 11.4.5-specific implication:
 - Identity guarantees cannot rely on HTTP controller semantics because the provided Adept 11.4.5 admin path is object-graph mutation plus native write-back.
 
+Mode/surface implication:
+- COM-path evidence qualifies native/Desktop realization; it does not replace the shared identity/mapping invariant contract both CLI and Client must preserve.
+
 ## Identity Model
+
+Shared-contract boundary:
+- The identity model below is the shared semantic contract across modes and both surfaces.
+- Mode-specific notes qualify realization details, not the invariant meaning.
 
 ### Step identity
 
@@ -61,6 +161,10 @@ For Adept 11.4.5, these invariants must also hold on the native Desktop/Core adm
 
 ## Non-Negotiable Invariants
 
+Shared-contract boundary:
+- All invariants below are shared across HTTP, COM, Mock, CLI, and Client.
+- Mode or surface differences must not weaken these rules.
+
 1. Step mapping must not depend on incidental server array ordering.
 2. Reviewer trustee type must be one of User, Group, Key; any other type is invalid for reviewer role.
 3. Step-level notification rows must remain step-bound (StepId congruence required).
@@ -85,7 +189,13 @@ This prevents cross-step leakage when server step collections are returned out o
 11.4.5 native qualification:
 - Native persistence is object-graph-driven, but step ownership invariants still apply because trustee/notification rows are written under step/workflow owner IDs.
 
+Mode boundary:
+- The explanation above describes the shared invariant; native qualification explains one realization context, not a different rule.
+
 ## Reviewer Trustee Mapping Contract
+
+Shared-contract boundary:
+- The reviewer mapping rules below are invariant requirements across all modes and both surfaces.
 
 ### Allowed reviewer types
 
@@ -107,6 +217,9 @@ Any disallowed reviewer type is a hard validation error.
 - Missing expected reviewer identities cause operation failure.
 
 ## Notification Mapping Contract
+
+Shared-contract boundary:
+- The notification mapping rules below are invariant requirements across all modes and both surfaces.
 
 ### Step ownership
 
@@ -132,6 +245,9 @@ Recipients are deduplicated by canonical key:
 
 If all provided notify/alert rows on a step are invalid, operation fails with actionable validation output.
 
+Mode/surface boundary:
+- Modes and surfaces may differ in where or how validation is surfaced, but not in whether these rows are considered valid or blocking.
+
 ### Post-save notification verification
 
 - Expected alert and email recipient identities are computed from input by step.
@@ -139,6 +255,9 @@ If all provided notify/alert rows on a step are invalid, operation fails with ac
 - Missing expected recipients cause operation failure.
 
 ## Acceptable Matching Behavior
+
+Shared-contract boundary:
+- Matching rules below are semantic allowances shared across all modes and both surfaces.
 
 ### Case sensitivity
 
@@ -176,6 +295,9 @@ When User trustee input requires normalization:
 
 ## Failure Policy
 
+Shared-contract boundary:
+- Failure semantics below are invariant across all modes and both surfaces.
+
 Hard failure conditions include:
 - Invalid reviewer trustee type.
 - Duplicate step names after normalization.
@@ -185,6 +307,9 @@ Hard failure conditions include:
 - Identity mapping ambiguity that cannot be resolved deterministically.
 
 Warnings are allowed only for non-identity concerns (for example visibility context warnings), not for identity mismatch.
+
+Surface/mode boundary:
+- CLI and Client may present identity failures differently, and HTTP/COM/Mock may discover them through different mechanisms, but identity mismatch remains a hard failure in all cases.
 
 ## Mode Notes
 
@@ -203,6 +328,14 @@ Warnings are allowed only for non-identity concerns (for example visibility cont
 
 - Must emulate contract semantics for identity verification and mismatch failures.
 - Mock success must not bypass invariant checks.
+
+## Surface/Mode Separation Checklist
+
+1. Does HTTP preserve the same identity invariants while using AWC-congruent user-id expectations and directory lookup behavior?
+2. Does COM/native preserve the same invariants through object-graph write-back and native persistence structures?
+3. Does Mock simulate identity mismatch and verification failure semantics rather than bypassing them?
+4. Do CLI and Client surface the same semantic identity failures even if diagnostics and UX differ?
+5. Are mode-specific lookup/write mechanics kept distinct from the shared invariant set itself?
 
 ## Implementation Traceability
 

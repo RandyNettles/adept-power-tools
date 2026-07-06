@@ -4,6 +4,99 @@
 
 This TDN captures Adept Power Tools-specific implementation details for sharing semantics and trustee identity handling that should stay outside the Adept 12 AWC deep-dive.
 
+This TDN also makes mode and surface boundaries explicit:
+- backend modes: HTTP, COM, Mock
+- product surfaces: CLI and Client
+
+## Boundary Model
+
+This TDN has two contract layers.
+
+### Layer 1: Shared share/identity contract
+
+Applies to:
+- All backend modes: HTTP, COM, Mock.
+- Both product surfaces: CLI and Client.
+
+Defines:
+- The semantic distinction between workflow-definition identity and workflow-sharing identity.
+- Trustee identity invariants.
+- Required separation between convenience visibility state and persisted workflow/trustee identity.
+
+Does not define:
+- Exact adapter mechanics.
+- Exact dialog or prompt UX.
+- Mode-specific storage/container implementation details beyond preserving the same semantic contract.
+
+### Layer 2: Mode and surface realization
+
+Applies to:
+- Mode-specific share and trustee persistence behavior.
+- CLI and Client orchestration/presentation behavior.
+
+Defines:
+- Where HTTP/COM/Mock behavior differs.
+- Where CLI and Client may differ in interaction style or support surface.
+
+Does not redefine:
+- The shared identity and sharing invariants.
+
+## Mode Boundaries (HTTP, COM, Mock)
+
+### HTTP mode
+
+HTTP mode is the primary current ATP implementation surface for explicit workflow share/unshare mutation and AWC-facing trustee identity congruence.
+
+HTTP-specific characteristics:
+- Share/unshare is container-centric and driven from workflow list metadata.
+- Trustee identity congruence is strongly constrained by AWC cache rehydration expectations.
+
+Boundary rule:
+- HTTP-specific transport and cache behaviors may differ, but they must preserve the shared identity and sharing invariants defined in this TDN.
+
+### COM mode
+
+COM mode realizes workflow sharing and trustee identity through native/Desktop list/container and write-back behavior.
+
+COM-specific characteristics:
+- Workflow sharing is layered on `CNTT_WFLIST` named-list/container records.
+- Admin workflow CRUD and explicit share changes are separate native actions.
+- Trustee persistence writes raw trustee id plus type.
+
+Boundary rule:
+- COM/native behavior may differ from HTTP API shape, but it must preserve the same semantic distinction between workflow identity, share visibility, and trustee identity.
+
+### Mock mode
+
+Mock mode is a deterministic simulation path for workflow authoring and visibility behavior.
+
+Mock-specific characteristics:
+- May simulate share state, visibility filtering, and trustee identity outcomes for testing.
+
+Boundary rule:
+- Mock mode must simulate the same identity and sharing invariants and must not silently weaken fail-fast unsupported-mode behavior.
+
+## Surface Boundaries (CLI and Client)
+
+### CLI surface
+
+CLI owns command-driven orchestration and textual reporting of workflow share/identity outcomes.
+
+CLI contract:
+- Must preserve the same semantic share/unshare and trustee identity rules.
+- May surface capability guidance and diagnostics in script-friendly form.
+
+### Client surface
+
+Client owns interactive workflow authoring, sharing, and assignment-adjacent UX.
+
+Client contract:
+- Must preserve the same semantic distinction between workflow definition, workflow sharing state, and trustee identity.
+- May present richer dialogs or pickers without altering the underlying contract.
+
+Boundary rule:
+- Surface differences may affect interaction model, but not share visibility semantics or trustee identity meaning.
+
 ## COM Path (11.4.5)
 
 Provided Adept 11.4.5 evidence separates two concerns:
@@ -16,7 +109,14 @@ Provided Adept 11.4.5 evidence separates two concerns:
 - New workflows are automatically given a private share-list entry on first save.
 - Explicit share changes are a second native action after create/modify, not an intrinsic part of workflow-definition creation.
 
+Mode/surface implication:
+- COM-path evidence qualifies native/Desktop realization; it does not replace the shared share/identity contract both CLI and Client must preserve.
+
 ## Share and Container Ownership Semantics
+
+Shared-contract boundary:
+- The sections below define semantic ownership rules shared across modes and both surfaces.
+- Implementation examples may be HTTP- or COM-specific, but the meaning of workflow identity versus share identity remains shared.
 
 ### 11.4.5 Native Share-List Model
 
@@ -73,6 +173,9 @@ Operational guidance:
 - Native explicit share path is `CWorkFlowAdmin::OnBnClickedShareWF` -> `CreateNameFromWFID` -> `GetWFListFromName` -> `UI_ShareObj` in `SHARE_WF` mode -> update list sharing flags from dialog result.
 - Optional native global-promotion helper exists through `CWorkFlowAdmin::OfferToShareWFGlobally` -> `HLIB_Cache::MakeListGlobal`.
 
+Mode boundary:
+- Explicit share/unshare mutation is currently an HTTP-supported ATP path and a native/Desktop COM path; unsupported modes must fail fast rather than silently downgrading share intent.
+
 ### 11.4.5 Native Visibility Retrieval and Assignment Rules
 
 Observed native retrieval paths:
@@ -89,7 +192,14 @@ Important native exception:
 Operational implication:
 - Third-client parity should preserve the in-use workflow visibility exception to avoid orphaned or uneditable library-assignment UX.
 
+Surface boundary:
+- CLI and Client may surface visibility and assignment-selection constraints differently, but both must preserve the same visibility rule and in-use exception semantics.
+
 ## Trustee Identity and AWC Display Fidelity
+
+Shared-contract boundary:
+- The trustee identity rules below are shared identity invariants across modes and both surfaces.
+- HTTP-specific AWC display behavior provides the strongest current evidence for the required persisted user-id congruence.
 
 ### Problem Summary
 
@@ -129,6 +239,14 @@ After create/modify, inspect saved workflow trustee rows and verify WFUT_USER tr
 - Native trustee persistence writes raw trustee id plus type; no HTTP-side normalization step exists in the observed native write path.
 - For third-client parity, preserve exact trustee IDs supplied to native add/write routes unless an explicit verified canonicalization rule is applied before commit.
 - Unknown recipient targets on reload should remain preserved and marked unresolved rather than discarded.
+
+## Surface/Mode Separation Checklist
+
+1. Does HTTP preserve container-centric share mutation and AWC-congruent trustee identity?
+2. Does COM/native preserve the distinction between workflow definition identity and workflow share-list identity?
+3. Does Mock simulate visibility and trustee identity invariants without weakening unsupported-mode behavior?
+4. Do CLI and Client surface the same share visibility and trustee identity semantics even if their UX differs?
+5. Are HTTP-specific cache/display constraints kept distinct from the shared trustee identity invariant?
 
 ## 11.4.5 Native Sharing Checklist
 

@@ -7,23 +7,124 @@ This TDN defines the architecture-level execution model for the import pipeline,
 - Idempotency expectations by stage and operation type.
 - Retry boundaries and non-retry boundaries.
 - Row-level outcome semantics and failure reporting behavior.
+- Clear separation between backend mode concerns (HTTP/COM/Mock) and product surface concerns (CLI/Client).
 
 ## Scope
 
 In scope:
 - Import validate and import run behavior for Excel-driven and XML+Excel flows.
+- Shared import pipeline semantics across runtime modes and surfaces.
 - End-to-end pipeline sequencing in ImportService.
 - Row-level processing outcomes and summary rollup semantics.
 - Failure and cancellation behavior at batch and row levels.
 
 Out of scope:
 - UI-specific rendering details.
+- CLI-only argument parsing specifics outside import pipeline semantics.
 - Transport-level resiliency policies outside import orchestration.
 - Non-import workflow operations.
+
+## Boundary Model
+
+This TDN has two distinct architecture layers.
+
+### Layer 1: Shared import pipeline contract
+
+Applies to:
+- All backend modes: HTTP, COM, Mock.
+- Both product surfaces: CLI and Client.
+
+Defines:
+- Stage sequence and stage gates.
+- Row outcome semantics.
+- Failure, cancellation, idempotency, and retry boundaries.
+
+Does not define:
+- CLI argument syntax or output formatting.
+- Client dialog/progress-pane layout.
+- Backend adapter transport details beyond their effect on stage semantics.
+
+### Layer 2: Mode and surface realization
+
+Applies to:
+- Mode-specific adapter behavior in HTTP/COM/Mock.
+- Surface orchestration and presentation in CLI and Client.
+
+Defines:
+- Where backend-specific differences are allowed.
+- Where CLI and Client may differ in interaction style.
+
+Does not redefine:
+- The core stage sequence.
+- Row outcome meanings.
+- Dry-run and cancellation semantics.
+
+## Mode Boundaries (HTTP, COM, Mock)
+
+### HTTP mode
+
+HTTP mode influences adapter mechanics and diagnostic richness, not pipeline stage meaning.
+
+Typical mode-specific characteristics:
+- Field lookup, search, save, create, and optional check-in calls are API-driven.
+- Error messages can preserve richer API payload detail.
+
+Boundary rule:
+- HTTP transport behavior may enrich diagnostics, but it must not alter stage ordering, row outcome semantics, or dry-run/cancellation meaning.
+
+### COM mode
+
+COM mode influences adapter mechanics and environment prerequisites, not pipeline stage meaning.
+
+Typical mode-specific characteristics:
+- Field lookup, search, save, create, and optional check-in use COM/native service paths.
+- COM setup/runtime prerequisites may fail before row processing begins.
+- Some operational details may be less diagnostic-rich than HTTP mode.
+
+Boundary rule:
+- COM mode must preserve the same stage gates, row outcomes, dry-run semantics, and failure categories even when underlying API signatures differ.
+
+### Mock mode
+
+Mock mode is a deterministic simulation path, not a production backend.
+
+Typical mode-specific characteristics:
+- Stage transitions and outcomes may be simulated for testing and demos.
+- Dry-run and SearchResultsOnly remain non-mutating.
+
+Boundary rule:
+- Mock mode may simulate results, but it must not redefine pipeline semantics or silently stand in for production modes after production failure.
+
+## Surface Boundaries (CLI and Client)
+
+### CLI surface
+
+CLI is responsible for command invocation, process completion, and textual/scriptable output.
+
+CLI contract:
+- Must preserve the shared pipeline stage and row-outcome semantics.
+- May expose validate/run/dry-run through command options and terminal output.
+- May add automation-oriented artifacts or exit-code behavior, but not alter pipeline meaning.
+
+### Client surface
+
+Client is responsible for interactive orchestration and visual presentation.
+
+Client contract:
+- Must preserve the same shared pipeline semantics.
+- May render stages, progress, warnings, and results differently from CLI.
+- May add richer interaction patterns, but must not redefine dry-run, cancellation, or row outcome meanings.
+
+Boundary rule:
+- This TDN governs import semantics for both surfaces, not their presentation design.
 
 ## Pipeline Architecture
 
 The import pipeline is stage-oriented and gate-driven.
+
+Shared-contract boundary:
+- The authoritative stage sequence below applies to HTTP, COM, and Mock, and to both CLI and Client.
+- Mode and surface differences may affect adapter wiring and presentation only.
 
 Authoritative stage sequence:
 1. Parse input.
@@ -132,6 +233,10 @@ Primary key display:
 
 ## Failure Model
 
+Shared-contract boundary:
+- The failure model below is mode-agnostic and surface-agnostic.
+- Backend mode changes the source of an error, not the stage boundary at which it is classified.
+
 ### Batch-fatal failures (pre-row)
 
 These fail batch before row loop:
@@ -166,6 +271,9 @@ Batch behavior:
 
 Import is not globally idempotent by default; idempotency is mode- and mapping-dependent.
 
+Boundary clarification:
+- Mode may affect how operations are executed, but idempotency risk classification is primarily driven by mapping/search semantics, not by CLI vs Client surface.
+
 ### Idempotent or near-idempotent paths
 
 - SearchResultsOnly mode: observational, non-mutating.
@@ -184,6 +292,9 @@ Import is not globally idempotent by default; idempotency is mode- and mapping-d
 3. Dry-run should be used as the preflight for high-risk runs.
 
 ## Retry Boundaries
+
+Shared-contract boundary:
+- Retry rules in this section apply to the import orchestration layer regardless of selected backend mode or surface.
 
 ### In-scope retries
 
@@ -232,6 +343,10 @@ Failure handling:
 
 ## Observability Contract
 
+Surface boundary:
+- The minimum fields below are semantic observability requirements shared by CLI and Client.
+- CLI and Client may present them differently.
+
 Minimum per-row observability:
 - RowNumber
 - PrimaryKeyDisplay
@@ -256,16 +371,33 @@ Progress events should report:
 
 - Primary production path for field lookup, search, save, create, and check-in API calls.
 - Error messages are surfaced from API client responses into row/batch messages.
+- HTTP-specific diagnostics may be richer, but stage and outcome semantics must remain unchanged.
 
 ### COM
 
 - Must preserve the same stage and outcome semantics.
 - Backend-specific API mechanics may differ, but stage gates and row outcome contract remain unchanged.
+- COM prerequisite/setup failures should still classify as pre-row batch-fatal conditions when they prevent pipeline entry.
 
 ### Mock
 
 - Must emulate stage transitions and row outcome semantics for testability.
 - Dry-run and SearchResultsOnly behavior must remain non-mutating in mock mode.
+- Mock simulation must remain explicit and must not redefine production pipeline semantics.
+
+## Surface Notes
+
+### CLI
+
+- May expose import behavior through separate `validate` and `run` commands plus dry-run flags.
+- Must preserve shared stage semantics, row outcome categories, and non-mutating dry-run behavior.
+- May add script-friendly summaries, logs, and exit semantics without redefining pipeline meaning.
+
+### Client
+
+- May expose import behavior through guided UI workflows, staging screens, progress panes, and results panels.
+- Must preserve the same validation gate, dry-run gate, row processing semantics, and summary rollups.
+- May differ in interaction style, but not in mutation boundary or result meaning.
 
 ## Traceability
 
@@ -286,3 +418,5 @@ Primary source context:
 5. Multiple-match rows are skipped with explicit cardinality message.
 6. AddIfNotFound create path requires valid create identity input.
 7. Batch summary counters equal the sum of row outcomes.
+8. HTTP, COM, and Mock preserve the same stage and row-outcome semantics.
+9. CLI and Client preserve the same import mutation boundaries even when interaction patterns differ.

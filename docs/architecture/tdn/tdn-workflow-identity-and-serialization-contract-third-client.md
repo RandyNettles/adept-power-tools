@@ -9,6 +9,10 @@ This TDN defines a stable, implementation-ready identity and serialization contr
 
 It is derived from observed AdeptWebClient behavior and TaskPane command payload patterns.
 
+This TDN also makes mode and surface boundaries explicit:
+- backend modes: HTTP, COM, Mock
+- product surfaces: CLI and Client
+
 ## Scope and Non-Goals
 
 In scope:
@@ -20,6 +24,95 @@ In scope:
 Out of scope:
 - Runtime workflow command execution UI (Approve/Reject/Reroute dialogs).
 - User account management semantics beyond workflow recipient lookup.
+
+## Boundary Model
+
+This TDN has two contract layers.
+
+### Layer 1: Shared identity/serialization contract
+
+Applies to:
+- All backend modes: HTTP, COM, Mock.
+- Both product surfaces: CLI and Client.
+
+Defines:
+- Canonical workflow/step/trustee/notification identity fields.
+- Allowed enum/value serialization semantics.
+- Required normalization, validation, and edge-case behavior.
+
+Does not define:
+- Exact transport API shapes for every backend.
+- Exact UI authoring flow.
+- Mode-specific persistence mechanics beyond preserving the same semantic contract.
+
+### Layer 2: Mode and surface realization
+
+Applies to:
+- Mode-specific persistence and serialization behavior.
+- CLI and Client orchestration/presentation behavior.
+
+Defines:
+- Where HTTP/COM/Mock realization differs.
+- Where CLI and Client may differ in interaction style.
+
+Does not redefine:
+- The shared identity/serialization contract itself.
+
+## Mode Boundaries (HTTP, COM, Mock)
+
+### HTTP mode
+
+HTTP mode is the primary current ATP implementation surface for JSON-based workflow identity and serialization behavior.
+
+HTTP-specific characteristics:
+- Uses numeric ASCII-code enum values in JSON payloads.
+- Uses full edit-model snapshot style save behavior.
+- AWC/Web API-oriented identity expectations strongly influence current ATP behavior.
+
+Boundary rule:
+- HTTP-specific transport shape may differ, but it must preserve the shared identity, enum, and validation contract.
+
+### COM mode
+
+COM mode realizes the same contract through native/Desktop object-graph mutation and table-write behavior.
+
+COM-specific characteristics:
+- Persists enum values as character-coded fields through native write paths.
+- Uses manager/list edit-session and `Update()` commit behavior rather than HTTP POST.
+
+Boundary rule:
+- COM/native realization may differ in transport and storage mechanics, but it must preserve the same semantic identity, enum, and normalization contract.
+
+### Mock mode
+
+Mock mode is a deterministic simulation path for authoring and persistence behavior.
+
+Mock-specific characteristics:
+- May simulate payloads, identity verification, and edge-case behavior for testing.
+
+Boundary rule:
+- Mock mode must simulate the same identity/serialization rules and must not silently weaken validation or invariant expectations.
+
+## Surface Boundaries (CLI and Client)
+
+### CLI surface
+
+CLI owns command-driven execution and textual reporting of workflow authoring and serialization outcomes.
+
+CLI contract:
+- Must preserve the same identity, serialization, and validation semantics.
+- May surface diagnostics and warnings in script-friendly form.
+
+### Client surface
+
+Client owns interactive workflow authoring orchestration and presentation of identity/serialization-sensitive outcomes.
+
+Client contract:
+- Must preserve the same identity, serialization, and validation semantics.
+- May use richer authoring UX without changing the underlying contract.
+
+Boundary rule:
+- Surface differences may affect interaction style, but not the meaning of persisted identity, enum values, or validation/pass-fail behavior.
 
 ## COM Path (11.4.5)
 
@@ -41,7 +134,14 @@ Interop-visible route in this codebase:
 - Native persistence writes enum fields as character codes; JSON bridges should still use numeric ASCII-code values when introducing a third client.
 - Delete side effects are part of the native write path, not a separate cleanup API.
 
+Mode/surface implication:
+- COM-path evidence qualifies native/Desktop realization; it does not replace the shared identity/serialization contract both CLI and Client must preserve.
+
 ## Canonical Identity Model
+
+Shared-contract boundary:
+- The identity model below is the shared semantic contract across modes and both surfaces.
+- Mode-specific notes qualify realization details, not the identity meaning itself.
 
 Use these canonical identifiers in the client domain model:
 - workflowId: string identifier.
@@ -60,6 +160,10 @@ Identity rules:
 - WFUT_APPROVERS is a synthetic target type and may persist with null targetId.
 
 ## Wire Enum Contract
+
+Shared-contract boundary:
+- The enum contract below is shared across modes and both surfaces.
+- HTTP and COM may realize it through different wire/storage mechanics while preserving the same semantic values.
 
 Workflow enums on Web API-oriented save paths use numeric values (ASCII-code style), not symbolic letters.
 
@@ -84,7 +188,14 @@ Persistence requirement:
 - Native code persists the same values as character-coded enum fields (`'U'`, `'G'`, `'K'`, `'E'`, `'A'`, `'T'`) via table write paths.
 - Numeric JSON values remain the correct transport bridge representation because they match the same ASCII codes used by native persistence.
 
+Mode boundary:
+- Numeric JSON values are an HTTP/bridge realization detail; the shared contract is the semantic enum identity itself.
+
 ## Recipient-to-Payload Mapping
+
+Shared-contract boundary:
+- The recipient mapping rules below are semantic contract requirements across modes and both surfaces.
+- Backend modes may realize them through different payload or object-graph shapes.
 
 ### Trustee list rows (step reviewer permissions)
 
@@ -123,7 +234,14 @@ Special synthetic default:
 - Native write path persists notification id, workflow object id, action, target type, target id, email, and ename.
 - Native add logic deduplicates email by lowercase email, Approvers by type only, and other recipients by `(type, id)`.
 
+Mode/surface boundary:
+- Modes and surfaces may differ in how recipients are authored or displayed, but not in the semantic mapping rules for persisted recipients.
+
 ## CRUD Payload Requirements
+
+Shared-contract boundary:
+- The CRUD requirements below define semantic requirements shared across modes and both surfaces.
+- HTTP and COM may express them through different mutation mechanisms.
 
 ### Create workflow
 
@@ -160,6 +278,10 @@ Client should treat system/protected workflows as non-deletable when server mark
 
 ## Normalization and Validation Rules
 
+Shared-contract boundary:
+- The normalization and validation rules below are shared across modes and both surfaces.
+- Mode-specific mechanics may affect how or where they are enforced, but not their semantic pass/fail meaning.
+
 Run these rules before save:
 - Trim text fields used as identifiers or emails.
 - Deduplicate recipients:
@@ -180,7 +302,13 @@ Recommended integrity checks:
 - Treat system workflow as immutable for edit/delete.
 - If active documents exist in the workflow being deleted, require explicit user confirmation before commit.
 
+Surface/mode boundary:
+- CLI and Client may present validation and confirmation differently, and HTTP/COM/Mock may enforce via different mechanics, but the blocking-versus-allowed distinction is shared.
+
 ## Enum/String Transformation Rules
+
+Shared-contract boundary:
+- Transformation rules below are semantic constraints across all modes and both surfaces.
 
 Where transformation is allowed:
 - UI may display friendly labels (User, Group, All Reviewers, Approve, Timeout).
@@ -195,6 +323,10 @@ Practical rule:
 - Transform back to numeric enums and raw IDs before serialization.
 
 ## Edge Cases
+
+Shared-contract boundary:
+- Edge-case handling below is shared across all modes and both surfaces.
+- Mode-specific notes qualify how the case appears, not whether it matters.
 
 1. Unknown target on reload
 - If saved targetId no longer exists in group/user caches, keep row in model and flag as unresolved in UI.
@@ -214,6 +346,9 @@ Practical rule:
 5. Locked workflow by another admin
 - Native modify path honors workflow-level edit lock behavior (`a11_Edit`).
 - Surface lock owner/message and do not force overwrite.
+
+Surface/mode boundary:
+- CLI and Client may surface lock contention differently, and COM/native may detect it differently from HTTP, but the semantic requirement remains the same.
 
 ## Example Outbound Snippets
 
@@ -286,3 +421,11 @@ Use these anchors to verify regressions when Web API contract changes.
 - `nativemain/Core/CliWorkflowTrusteeDefList.cpp`
 - `nativemain/Core/CliWorkflowNtfList.cpp`
 - `nativemain/Core/AdeptApiTypes.h`
+
+## Surface/Mode Separation Checklist
+
+1. Does HTTP preserve the same identity and enum semantics while using JSON edit-model transport?
+2. Does COM/native preserve the same identity and normalization semantics through object-graph and native table-write behavior?
+3. Does Mock simulate serialization, dedupe, and validation rules rather than bypassing them?
+4. Do CLI and Client preserve the same semantic validation, edge-case, and persisted-identity outcomes even if authoring UX differs?
+5. Are mode-specific transport/storage details kept distinct from the shared identity/serialization contract itself?

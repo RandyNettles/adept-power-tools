@@ -8,10 +8,15 @@ Define the architecture-level concurrency and lock lifecycle policy for workflow
 - Stale-lock handling and recovery expectations.
 - User-facing messaging and operator guidance.
 
+This TDN also makes mode and surface boundaries explicit:
+- backend modes: HTTP, COM, Mock
+- product surfaces: CLI and Client
+
 ## Scope
 
 In scope:
 - Workflow create, modify, and delete operational concurrency behavior.
+- Shared locking/recovery contract semantics across runtime modes and surfaces.
 - Tag-based edit locking in `AdeptTools.Workflow`.
 - Cleanup expectations for success, failure, and cancellation paths.
 - Support/operations guidance for lock contention and suspected stale locks.
@@ -20,6 +25,40 @@ Out of scope:
 - Non-workflow feature locking behavior.
 - Backend database internal lock implementation details.
 - Launcher visual design details not affecting operational semantics.
+
+## Boundary Model
+
+This TDN has two contract layers.
+
+### Layer 1: Shared locking and recovery contract
+
+Applies to:
+- All backend modes: HTTP, COM, Mock.
+- Both product surfaces: CLI and Client.
+
+Defines:
+- The semantic meaning of lock ownership.
+- Cleanup and fail-safe expectations.
+- Stale-lock posture and recovery rules.
+- User-facing distinction between contention, cleanup uncertainty, and failure.
+
+Does not define:
+- Exact tag API signatures.
+- Exact dialog/prompt UX.
+- Backend-native lock-table implementation details beyond what is needed to preserve the contract.
+
+### Layer 2: Mode and surface realization
+
+Applies to:
+- Backend-mode-specific lock mechanisms.
+- CLI and Client interaction/orchestration differences.
+
+Defines:
+- Where HTTP/COM/Mock behavior differs.
+- Which surface owns which presentation and control responsibilities.
+
+Does not redefine:
+- The shared concurrency and recovery contract.
 
 ## Source Context
 
@@ -30,6 +69,61 @@ Primary references:
 - src/AdeptTools.Workflow/Api/IWorkflowApiClient.cs
 - src/AdeptTools.Workflow/Models/WorkflowEditModel.cs
 - src/AdeptTools.Workflow/Models/WorkflowAdminItem.cs
+
+## Mode Boundaries (HTTP, COM, Mock)
+
+### HTTP mode
+
+HTTP mode is the primary current ATP implementation surface for tag-based workflow locking.
+
+HTTP-specific characteristics:
+- Lock ownership is exposed through HTTP workflow edit/tag operations.
+- Save flows can include HTTP-specific transient failure handling while lock is held.
+
+Boundary rule:
+- HTTP-specific tag mechanics may differ, but they must preserve the shared ownership, cleanup, and stale-lock contract.
+
+### COM mode
+
+COM mode realizes the same lock contract through native/Desktop edit sessions and multiple native lock scopes.
+
+COM-specific characteristics:
+- Native admin-session critical section exists.
+- Per-workflow tag, single-admin tag, and save/copy serialization tag are distinct native mechanisms.
+
+Boundary rule:
+- COM/native mechanisms may be richer than HTTP, but they must preserve the same semantic lock ownership and recovery guarantees.
+
+### Mock mode
+
+Mock mode is a deterministic simulation path for lock and recovery behavior.
+
+Mock-specific characteristics:
+- May emulate lock acquisition failure, cleanup warnings, and stale-lock scenarios.
+
+Boundary rule:
+- Mock must simulate the same locking semantics and must not silently weaken contention, cleanup, or stale-lock behavior.
+
+## Surface Boundaries (CLI and Client)
+
+### CLI surface
+
+CLI owns command-driven orchestration and textual reporting of workflow locking outcomes.
+
+CLI contract:
+- Must preserve the same semantic lock-ownership, skip/fail, warning, and stale-lock guidance rules.
+- May present contention and cleanup outcomes in script-friendly form.
+
+### Client surface
+
+Client owns interactive workflow authoring orchestration and presentation of lock/recovery outcomes.
+
+Client contract:
+- Must preserve the same semantic ownership, cleanup, and stale-lock behavior.
+- May use dialogs, owner displays, or disablement UX without changing the underlying contract.
+
+Boundary rule:
+- Surface differences may affect interaction style, but not the meaning of lock ownership, recovery, or cleanup outcomes.
 
 ## COM Path (11.4.5)
 
@@ -44,6 +138,9 @@ Observed Adept 11.4.5 native admin locking path:
   - per-workflow edit lock using workflow id as tag identity,
   - single-admin lock (`SINGLE_ADMIN_MGR_TAG_ID`) for destructive admin serialization,
   - workflow-save lock (`WF_SAVE_LOCK_ID`) for save/copy serialization.
+
+Mode/surface implication:
+- COM-path evidence qualifies native realization; it does not replace the shared locking/recovery contract both CLI and Client must preserve.
 
 ## 11.4.5 Native Lock Model
 
@@ -149,8 +246,13 @@ Without a unified policy, concurrency outcomes can become inconsistent across CL
 5. Stale-lock recovery is operator-mediated unless backend exposes explicit safe-force-unlock capability.
 6. User messaging must clearly distinguish lock contention, save failure, and cleanup uncertainty.
 7. COM/native mode may require multiple lock scopes for a single user operation: edit-session, per-workflow edit lock, destructive-operation lock, and save/copy serialization lock.
+8. Mode-specific lock mechanisms and surface-specific UX may differ, but the shared semantic contract must remain stable.
 
 ## Concurrency Model
+
+Shared-contract boundary:
+- The model below defines semantic ownership and release behavior shared across modes and both surfaces.
+- HTTP/COM/Mock differences change the mechanism, not the contract.
 
 Workflow operations use optimistic orchestration with explicit edit ownership:
 
@@ -171,6 +273,9 @@ Design intent:
 - Native orchestration distinguishes per-workflow edit ownership from broader admin-session and destructive/save serialization locks.
 
 ## Lock Ownership Contract
+
+Shared-contract boundary:
+- The rules below define ownership semantics shared across modes and both surfaces.
 
 ### Authoritative owner
 
@@ -204,6 +309,10 @@ Only then may lock release occur.
 
 ## Lock Lifecycle and Cleanup Policy
 
+Shared-contract boundary:
+- Cleanup rules below are semantic guarantees shared across modes and both surfaces.
+- Mode-specific cleanup primitives may differ.
+
 ### Success path
 
 1. Acquire/hold lock.
@@ -234,6 +343,10 @@ Only then may lock release occur.
 - Attempt untag when cancellation occurs after lock acquisition.
 
 ## Delete Concurrency Policy
+
+Shared-contract boundary:
+- Delete locking semantics below define the shared safety posture.
+- Native COM mode may add broader destructive-operation locks without changing the underlying contract.
 
 Delete never force-breaks locks.
 
@@ -278,6 +391,10 @@ If backend later supports safe stale-lock metadata and force-release API:
 
 ## User Messaging Contract
 
+Surface boundary:
+- The semantic message classes below are shared across CLI and Client.
+- Presentation style may differ by surface, but the distinctions must remain intact.
+
 Messages must be actionable and class-distinct.
 
 ### Lock contention message
@@ -308,6 +425,10 @@ Required message elements:
 - Manual verification/release required via authoritative admin surface.
 
 ## Recovery Playbooks
+
+Shared-contract boundary:
+- The playbooks below define semantic operator guidance shared across modes and surfaces.
+- Mode- or surface-specific instructions may elaborate but must not contradict these branches.
 
 ## Playbook A: Locked by active owner
 
@@ -351,6 +472,11 @@ Required message elements:
 - Should map `Edit(ref msg)` / `a11_Edit` failures into the same user-facing lock contention contract used by HTTP mode.
 - Should expose or emulate native lock-scope distinctions where the operation semantics differ materially.
 
+### Mock
+
+- Must emulate lock acquisition failure, cleanup warning, and contention messaging paths for regression coverage.
+- Must preserve the same semantic contract even though the lock implementation is simulated.
+
 ## 11.4.5 Native-Specific Recovery Notes
 
 - `CancelEdit()` should be treated as the native cleanup path when an edit session is abandoned before `Update()`.
@@ -358,9 +484,13 @@ Required message elements:
 - Native clients should periodically refresh lock-table state and prune stale local lock-owner caches.
 - Save/copy contention should be surfaced separately from per-workflow edit contention.
 
-### Mock
+## Surface/Mode Separation Checklist
 
-- Must emulate lock acquisition failure, cleanup warning, and contention messaging paths for regression coverage.
+1. Does HTTP preserve the same ownership, cleanup, and stale-lock semantics through its tag-based workflow API?
+2. Does COM/native preserve the same semantic contract across edit-session, per-workflow, single-admin, and save locks?
+3. Does Mock simulate contention, cleanup uncertainty, and stale-lock guidance rather than bypassing them?
+4. Do CLI and Client surface the same semantic distinction between contention, cleanup warning, and hard failure?
+5. Are native/HTTP mechanism differences kept distinct from the shared lock/recovery contract?
 
 ## Implementation Requirements
 
