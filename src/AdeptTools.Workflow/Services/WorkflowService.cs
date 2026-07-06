@@ -272,6 +272,18 @@ public class WorkflowService : IWorkflowService
                 };
             }
 
+            var notificationPersistenceResult = await ValidateNotificationTrusteePersistenceAsync(input, workflowId, ct);
+            if (!string.IsNullOrWhiteSpace(notificationPersistenceResult.Error))
+            {
+                await TryUntagAsync(workflowId, ct);
+                return new WorkflowOperationResult
+                {
+                    WorkflowName = input.Name,
+                    Status = WorkflowResultStatus.Fail,
+                    Message = notificationPersistenceResult.Error
+                };
+            }
+
             // 6. Post-save visibility check (same auth/context as this create call)
             var (visibleToCurrentContext, ownerDisplay, ownerUserId, shareStatus) =
                 await CheckWorkflowVisibilityAsync(workflowId, input.Name, ct);
@@ -290,12 +302,15 @@ public class WorkflowService : IWorkflowService
             var untagWarning = createUntagResult.IsSuccess
                 ? string.Empty
                 : " WARNING: workflow was saved but the edit lock may not have been released — verify in the web client.";
+            var notifDiag = string.IsNullOrWhiteSpace(notificationPersistenceResult.Diagnostic)
+                ? string.Empty
+                : $" Notification check: {notificationPersistenceResult.Diagnostic}.";
 
             return new WorkflowOperationResult
             {
                 WorkflowName = input.Name,
                 Status = WorkflowResultStatus.Success,
-                Message = $"Created ({input.Steps.Count} steps, {totalTrustees} trustees, owner: {ownership}, shared: {sharedText}, share-status: {shareStatus ?? "unknown"}).{visibilityWarning}{untagWarning}",
+                Message = $"Created ({input.Steps.Count} steps, {totalTrustees} trustees, owner: {ownership}, shared: {sharedText}, share-status: {shareStatus ?? "unknown"}).{notifDiag}{visibilityWarning}{untagWarning}",
                 StepCount = input.Steps.Count,
                 TrusteeCount = totalTrustees
             };
@@ -641,6 +656,18 @@ public class WorkflowService : IWorkflowService
                 };
             }
 
+            var notificationPersistenceResult = await ValidateNotificationTrusteePersistenceAsync(input, workflowId, ct);
+            if (!string.IsNullOrWhiteSpace(notificationPersistenceResult.Error))
+            {
+                await _apiClient.UntagAsync(workflowId, ct);
+                return new WorkflowOperationResult
+                {
+                    WorkflowName = input.Name,
+                    Status = WorkflowResultStatus.Fail,
+                    Message = notificationPersistenceResult.Error
+                };
+            }
+
             var (visibleToCurrentContext, ownerDisplay, ownerUserId, shareStatus) =
                 await CheckWorkflowVisibilityAsync(workflowId, input.Name, ct);
 
@@ -657,12 +684,15 @@ public class WorkflowService : IWorkflowService
             var untagWarning = modifyUntagResult.IsSuccess
                 ? string.Empty
                 : " WARNING: workflow was saved but the edit lock may not have been released — verify in the web client.";
+            var notifDiag = string.IsNullOrWhiteSpace(notificationPersistenceResult.Diagnostic)
+                ? string.Empty
+                : $" Notification check: {notificationPersistenceResult.Diagnostic}.";
 
             return new WorkflowOperationResult
             {
                 WorkflowName = input.Name,
                 Status = WorkflowResultStatus.Success,
-                Message = $"{input.Name}: modified ({input.Steps.Count} steps, {totalTrustees} trustees, owner: {ownership}, shared: {sharedText}, share-status: {shareStatus ?? "unknown"}).{visibilityWarning}{untagWarning}",
+                Message = $"{input.Name}: modified ({input.Steps.Count} steps, {totalTrustees} trustees, owner: {ownership}, shared: {sharedText}, share-status: {shareStatus ?? "unknown"}).{notifDiag}{visibilityWarning}{untagWarning}",
                 StepCount = input.Steps.Count,
                 TrusteeCount = totalTrustees
             };
@@ -1210,6 +1240,131 @@ public class WorkflowService : IWorkflowService
         }
 
         return null;
+    }
+
+    private async Task<(string? Error, string? Diagnostic)> ValidateNotificationTrusteePersistenceAsync(
+        WorkflowInputModel input,
+        string workflowId,
+        CancellationToken ct)
+    {
+        var stepsWithNotifications = input.Steps
+            .Select(s => new
+            {
+                StepName = s.Name?.Trim() ?? string.Empty,
+                Alert = s.Trustees
+                    .Where(t => t.Role == TrusteeRole.AlertNotify)
+                    .Select(t => (Id: t.TrusteeId?.Trim() ?? string.Empty, Type: t.TrusteeType))
+                    .Where(x => x.Type == WorkflowUserType.Approvers || !string.IsNullOrWhiteSpace(x.Id))
+                    .ToList(),
+                Email = s.Trustees
+                    .Where(t => t.Role == TrusteeRole.EmailNotify)
+                    .Select(t => (Id: t.TrusteeId?.Trim() ?? string.Empty, Type: t.TrusteeType))
+                    .Where(x => x.Type == WorkflowUserType.Approvers || !string.IsNullOrWhiteSpace(x.Id))
+                    .ToList()
+            })
+            .Where(s => s.Alert.Count > 0 || s.Email.Count > 0)
+            .ToList();
+
+        if (stepsWithNotifications.Count == 0)
+            return (null, null);
+
+        var persisted = await _apiClient.GetWorkflowAsync(workflowId, ct);
+        var diagParts = new List<string>();
+
+        foreach (var step in stepsWithNotifications)
+        {
+            var persistedStep = persisted.WorkflowStepModels
+                .Where(s => !s.BDeleted)
+                .FirstOrDefault(s =>
+                    string.Equals(s.WorkflowStepDefinition.Name?.Trim(), step.StepName, StringComparison.OrdinalIgnoreCase));
+
+            if (persistedStep is null)
+            {
+                diagParts.Add($"step '{step.StepName}' not found in persisted model");
+                continue;
+            }
+
+            if (step.Alert.Count > 0)
+            {
+                var (error, diag) = CheckNotificationList(
+                    step.Alert,
+                    persistedStep.AlertNotificationList,
+                    step.StepName, "alert");
+                diagParts.Add(diag);
+                if (error is not null) return (error, string.Join("; ", diagParts));
+            }
+
+            if (step.Email.Count > 0)
+            {
+                var (error, diag) = CheckNotificationList(
+                    step.Email,
+                    persistedStep.EmailNotificationList,
+                    step.StepName, "email/notify");
+                diagParts.Add(diag);
+                if (error is not null) return (error, string.Join("; ", diagParts));
+            }
+        }
+
+        return (null, diagParts.Count > 0 ? string.Join("; ", diagParts) : null);
+    }
+
+    private static (string? Error, string Diagnostic) CheckNotificationList(
+        List<(string Id, WorkflowUserType Type)> expected,
+        List<WorkflowNotificationDefinition> persistedList,
+        string stepName,
+        string notificationKind)
+    {
+        // Approvers entries are matched by type alone (TrusteeId is always empty for this type).
+        var expectedApprovers = expected.Where(x => x.Type == WorkflowUserType.Approvers).ToList();
+        var expectedById = expected.Where(x => x.Type != WorkflowUserType.Approvers).ToList();
+
+        var actualEntries = (persistedList ?? new List<WorkflowNotificationDefinition>())
+            .Select(n => (Id: (n.TargetId ?? n.TrusteeId)?.Trim() ?? string.Empty, Type: n.TargetType))
+            .ToList();
+
+        var diagSent = string.Join(", ", expected.Select(x => $"{x.Id}({(char)x.Type})"));
+        var diagPersisted = actualEntries.Count == 0
+            ? "none"
+            : string.Join(", ", actualEntries.Select(x => $"{x.Id}({(char)x.Type})"));
+        var diagnostic = $"step '{stepName}' {notificationKind}: sent=[{diagSent}] persisted=[{diagPersisted}]";
+
+        foreach (var _ in expectedApprovers)
+        {
+            if (!actualEntries.Any(a => a.Type == WorkflowUserType.Approvers))
+                return (
+                    $"Workflow saved but {notificationKind} trustees did not persist on step '{stepName}': " +
+                    $"expected 'Approvers' recipient was not found.",
+                    diagnostic);
+        }
+
+        if (expectedById.Count > 0)
+        {
+            // Use direct case-insensitive comparison of the exact IDs that ATP sent.
+            // Alias resolution (GUID ↔ login-name) must NOT be used here: the server must
+            // store the exact ID format that ATP sent; otherwise AWC cannot resolve the
+            // recipient in its usersCache even though the same user exists in the system.
+            var actualById = actualEntries.Where(a => a.Type != WorkflowUserType.Approvers).ToList();
+            var missing = expectedById
+                .Where(item => !actualById.Any(a =>
+                    string.Equals(a.Id, item.Id, StringComparison.OrdinalIgnoreCase)))
+                .Select(item => $"{item.Id}({(char)item.Type})")
+                .ToList();
+
+            if (missing.Count > 0)
+            {
+                var actualText = actualById.Count == 0
+                    ? "none (server dropped all entries)"
+                    : string.Join(", ", actualById.Select(x => $"{x.Id}({(char)x.Type})"));
+
+                return (
+                    $"Workflow saved but {notificationKind} trustees did not persist on step '{stepName}'. " +
+                    $"Missing: [{string.Join(", ", missing)}]. " +
+                    $"Persisted {notificationKind} trustees: [{actualText}].",
+                    diagnostic);
+            }
+        }
+
+        return (null, diagnostic);
     }
 
     private async Task<List<string>> FindMissingTrusteesAsync(

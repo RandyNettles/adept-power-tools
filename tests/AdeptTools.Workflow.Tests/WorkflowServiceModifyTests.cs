@@ -715,6 +715,121 @@ public class WorkflowServiceModifyTests
         return path;
     }
 
+    [Fact]
+    public async Task ModifyAsync_AlertTrustees_DroppedByServer_ReturnsFailure()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var client = new NotificationDroppingModifyClient(savedModels, dropAlert: true, dropEmail: false);
+        var service = CreateService(client);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Design Review"" Active=""true"">
+            <Steps>
+                <Step Name=""Review"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                        <Trustee Id=""alertuser@company.com"" Type=""Email"" Role=""Alert"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.ModifyAsync(
+                new WorkflowModifyRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Failed);
+            Assert.Equal(0, result.Succeeded);
+            var msg = result.Results[0].Message ?? string.Empty;
+            Assert.Contains("alert", msg, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("did not persist", msg, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
+    public async Task ModifyAsync_EmailNotifyTrustees_DroppedByServer_ReturnsFailure()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var client = new NotificationDroppingModifyClient(savedModels, dropAlert: false, dropEmail: true);
+        var service = CreateService(client);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Design Review"" Active=""true"">
+            <Steps>
+                <Step Name=""Review"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                        <Trustee Id=""notify@company.com"" Type=""Email"" Role=""Notify"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.ModifyAsync(
+                new WorkflowModifyRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Failed);
+            Assert.Equal(0, result.Succeeded);
+            var msg = result.Results[0].Message ?? string.Empty;
+            Assert.Contains("email/notify", msg, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("did not persist", msg, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
+    public async Task ModifyAsync_AlertAndEmailNotifyTrustees_BothPersist_Succeeds()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var client = new CapturingModifyClient(savedModels);
+        var service = CreateService(client);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Design Review"" Active=""true"">
+            <Steps>
+                <Step Name=""Review"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                        <Trustee Id=""alert@company.com"" Type=""Email"" Role=""Alert"" />
+                        <Trustee Id=""notify@company.com"" Type=""Email"" Role=""Notify"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.ModifyAsync(
+                new WorkflowModifyRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Equal(0, result.Failed);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
     private class CapturingModifyClient : MockWorkflowApiClient
     {
         protected readonly List<WorkflowEditModel> SavedModels;
@@ -1121,6 +1236,41 @@ public class WorkflowServiceModifyTests
             }
 
             return base.SaveWorkflowAsync(model, ct);
+        }
+    }
+
+    /// <summary>
+    /// Saves the workflow normally but clears alert and/or email notification lists
+    /// on re-fetch, simulating server-side silent drop in UpdateNotifications.
+    /// </summary>
+    private sealed class NotificationDroppingModifyClient : CapturingModifyClient
+    {
+        private readonly bool _dropAlert;
+        private readonly bool _dropEmail;
+
+        public NotificationDroppingModifyClient(
+            List<WorkflowEditModel> saved,
+            bool dropAlert,
+            bool dropEmail)
+            : base(saved)
+        {
+            _dropAlert = dropAlert;
+            _dropEmail = dropEmail;
+        }
+
+        public override Task<WorkflowEditModel> GetWorkflowAsync(string workflowId, CancellationToken ct = default)
+        {
+            var model = base.GetWorkflowAsync(workflowId, ct).Result;
+
+            foreach (var step in model.WorkflowStepModels)
+            {
+                if (_dropAlert)
+                    step.AlertNotificationList = new List<WorkflowNotificationDefinition>();
+                if (_dropEmail)
+                    step.EmailNotificationList = new List<WorkflowNotificationDefinition>();
+            }
+
+            return Task.FromResult(model);
         }
     }
 }
