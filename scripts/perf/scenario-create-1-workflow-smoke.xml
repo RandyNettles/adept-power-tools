@@ -1,0 +1,16 @@
+<AdeptWorkflowConfig>
+  <DryRun>true</DryRun>
+  <Workflows>
+    <Workflow Name="PERF_Create_Smoke" Active="true" Shared="false">
+      <Memo>Single workflow create smoke test</Memo>
+      <TimeoutDays>3</TimeoutDays>
+      <Steps>
+        <Step Name="Review" ApprovalsRequired="1" AutoAdvance="false">
+          <Trustees>
+            <Trustee Id="perf_user_001" Type="User" Role="Reviewer" />
+          </Trustees>
+        </Step>
+      </Steps>
+    </Workflow>
+  </Workflows>
+</AdeptWorkflowConfig>
