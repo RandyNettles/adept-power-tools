@@ -962,12 +962,10 @@ public class WorkflowService : IWorkflowService
             .Where(n => string.Equals(n.StepId, stepId, StringComparison.Ordinal))
             .ToList();
 
-        var allNotifyInputCount = emailNotify.Count() + alertNotify.Count();
-        var validNotifyCount = stepModel.EmailNotificationList.Count + stepModel.AlertNotificationList.Count;
         var invalidNotifyCount = invalidEmailNotifyCount + invalidAlertNotifyCount;
-        if (allNotifyInputCount > 0 && validNotifyCount == 0 && invalidNotifyCount > 0)
+        if (invalidNotifyCount > 0)
         {
-            return $"Step '{input.Name}': all notify/alert recipients are invalid. " +
+            return $"Step '{input.Name}': notify/alert recipients include invalid entries. " +
                    "Provide valid user/group/key/email recipients, or use Approvers.";
         }
 
@@ -1046,7 +1044,14 @@ public class WorkflowService : IWorkflowService
                     ? null
                     : normalizedId,
                 TargetType = trustee.TrusteeType,
-                Email = trustee.TrusteeType == WorkflowUserType.Email ? normalizedId : string.Empty
+                Email = trustee.TrusteeType == WorkflowUserType.Email
+                    ? normalizedId
+                    : trustee.TrusteeType == WorkflowUserType.Approvers
+                        ? null
+                        : string.Empty,
+                EName = trustee.TrusteeType == WorkflowUserType.Approvers
+                    ? "All Reviewers"
+                    : normalizedId
             });
         }
 

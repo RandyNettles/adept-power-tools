@@ -51,6 +51,6 @@ public class WorkflowNotificationDefinition
         set => StepId = value;
     }
 
-    public string Email { get; set; } = string.Empty;
+    public string? Email { get; set; }
     public string EName { get; set; } = string.Empty;
 }

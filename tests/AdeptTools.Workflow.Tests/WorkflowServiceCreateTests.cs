@@ -352,8 +352,99 @@ public class WorkflowServiceCreateTests
             Assert.Equal(1, result.Failed);
             Assert.Contains(result.Results, r =>
                 r.Status == WorkflowResultStatus.Fail &&
-                (r.Message ?? string.Empty).Contains("all notify/alert recipients are invalid", StringComparison.OrdinalIgnoreCase));
+                (r.Message ?? string.Empty).Contains("notify/alert recipients include invalid entries", StringComparison.OrdinalIgnoreCase));
             Assert.Empty(savedModels);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
+    public async Task CreateAsync_PartialInvalidNotifyRecipients_FailsWithoutSaving()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var capturingClient = new CapturingSaveClient(savedModels);
+        var service = CreateService(capturingClient);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Partial Invalid Notify WF"" Active=""true"">
+            <Steps>
+                <Step Name=""Review Step"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                        <Trustee Id=""notify@company.com"" Type=""Email"" Role=""Notify"" />
+                        <Trustee Id=""bad-email"" Type=""Email"" Role=""Notify"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.CreateAsync(
+                new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Failed);
+            Assert.Contains(result.Results, r =>
+                r.Status == WorkflowResultStatus.Fail &&
+                (r.Message ?? string.Empty).Contains("notify/alert recipients include invalid entries", StringComparison.OrdinalIgnoreCase));
+            Assert.Empty(savedModels);
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
+    public async Task CreateAsync_NotificationPayload_SetsENameAndApproversNullEmail()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var capturingClient = new CapturingSaveClient(savedModels);
+        var service = CreateService(capturingClient);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Notify Payload WF"" Active=""true"">
+            <Steps>
+                <Step Name=""Review Step"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                        <Trustee Id=""notify@company.com"" Type=""Email"" Role=""Notify"" />
+                        <Trustee Id=""Approvers"" Type=""A"" Role=""Alert"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.CreateAsync(
+                new WorkflowCreateRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Succeeded);
+            Assert.Single(savedModels);
+
+            var step = savedModels[0].WorkflowStepModels[0];
+            Assert.Single(step.EmailNotificationList);
+            Assert.Single(step.AlertNotificationList);
+
+            var emailNotify = step.EmailNotificationList[0];
+            Assert.Equal("notify@company.com", emailNotify.Email);
+            Assert.Equal("notify@company.com", emailNotify.EName);
+
+            var approversAlert = step.AlertNotificationList[0];
+            Assert.Equal(WorkflowUserType.Approvers, approversAlert.Type);
+            Assert.Null(approversAlert.TargetId);
+            Assert.Null(approversAlert.Email);
+            Assert.Equal("All Reviewers", approversAlert.EName);
         }
         finally
         {

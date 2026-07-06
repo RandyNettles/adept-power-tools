@@ -169,6 +169,46 @@ public class WorkflowServiceModifyTests
     }
 
     [Fact]
+    public async Task ModifyAsync_PartialInvalidNotifyRecipients_FailsWithoutSaving()
+    {
+        var savedModels = new List<WorkflowEditModel>();
+        var client = new CapturingModifyClient(savedModels);
+        var service = CreateService(client);
+
+        var xmlPath = CreateTempXmlRaw(@"<AdeptWorkflowConfig>
+    <Workflows>
+        <Workflow Name=""Design Review"" Active=""true"">
+            <Steps>
+                <Step Name=""Review"">
+                    <Trustees>
+                        <Trustee Id=""reviewer1"" Type=""User"" Role=""Reviewer"" />
+                        <Trustee Id=""notify@company.com"" Type=""Email"" Role=""Notify"" />
+                        <Trustee Id=""bad-email"" Type=""Email"" Role=""Notify"" />
+                    </Trustees>
+                </Step>
+            </Steps>
+        </Workflow>
+    </Workflows>
+</AdeptWorkflowConfig>");
+
+        try
+        {
+            var result = await service.ModifyAsync(
+                new WorkflowModifyRequest { InputFilePath = xmlPath, DryRun = false });
+
+            Assert.Equal(1, result.Failed);
+            Assert.Empty(savedModels);
+            Assert.Contains(result.Results, r =>
+                r.Status == WorkflowResultStatus.Fail &&
+                (r.Message ?? string.Empty).Contains("notify/alert recipients include invalid entries", StringComparison.OrdinalIgnoreCase));
+        }
+        finally
+        {
+            File.Delete(xmlPath);
+        }
+    }
+
+    [Fact]
     public async Task ModifyAsync_SaveTransientDisposedContext_RetriesOnce_ThenSucceeds()
     {
         var savedModels = new List<WorkflowEditModel>();
