@@ -4,6 +4,15 @@
 
 This TDN captures Adept Power Tools hardening decisions that were intentionally removed from the Adept 12 AWC deep-dive to keep source-of-truth boundaries clear.
 
+## COM Path (11.4.5)
+
+The provided Adept 11.4.5 evidence adds a second hardening reference path beyond HTTP/AWC save behavior:
+- Native admin CRUD persists through `CCliWorkflowDefManager::Update()` and child-list `Write()` methods.
+- Notification and trustee dedupe/ownership rules are enforced in native add/write list layers as well as HTTP-mode mapping code.
+
+11.4.5-specific implication:
+- Hardening changes in Adept Power Tools should be evaluated against both HTTP full-snapshot persistence and native object-graph write-back semantics.
+
 ## Incident Summary
 
 Observed behavior during Adept Power Tools workflow create flow:
@@ -56,3 +65,8 @@ Adept Power Tools retries save once for known transient HTTP failure signatures:
 
 - Draft retains Designers notify once.
 - Review has no notify recipients unless explicitly declared.
+
+## 11.4.5 Native-Specific Hardening Notes
+
+- Native notification add paths dedupe email by lowercase email, Approvers by type, and other recipients by `(type, id)`.
+- Native delete/update commit paths carry side effects beyond row replacement, so hardening around canonical read-back and scope ownership remains necessary when aligning ATP with 11.4.5 behavior.

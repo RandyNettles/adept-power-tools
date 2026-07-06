@@ -19,6 +19,16 @@ Out of scope:
 - Import pipeline contracts.
 - Delete/list contracts not tied to save boundary semantics.
 
+## COM Path (11.4.5)
+
+Adept 11.4.5 admin workflow persistence uses native/Desktop edit-session and object-graph write-back semantics:
+- Create: native add/editor flow -> `CCliWorkflowDefManager::Update()`.
+- Modify: `CCliWorkflowDefManager::a11_Edit(workflowId, msg)` -> mutate graph -> `Update()`.
+- Delete: `CCliWorkflowDefList::Delete(workflowId)` -> `Update()`.
+
+11.4.5-specific implication:
+- The save boundary is still a full object-graph commit boundary even though it is not expressed as one HTTP `WorkflowEditModel` POST.
+
 ## Authoritative Save Boundary
 
 Workflow create and modify are full-snapshot authoring operations.
@@ -33,12 +43,18 @@ Implication:
 - Save intent is snapshot-based.
 - Canonical state after save is server-returned, not client-assumed.
 
+11.4.5 native qualification:
+- In COM/Desktop mode, the equivalent snapshot is the in-memory workflow graph owned by `CCliWorkflowDefManager` and child lists at the moment `Update()` is called.
+
 ## Canonicalization Rules
 
 ### Rule 1: Server response is canonical after save
 
 After save succeeds, persistence checks use a fresh GetWorkflow read.
 Any mismatch between expected and persisted trustees/notifications is treated as contract failure.
+
+11.4.5 native qualification:
+- Native parity checks should treat post-`Update()` persisted rows in WF/WFSTEP/WFTR/NOTIFY as canonical truth, not the pre-write editor graph.
 
 ### Rule 2: Step identity is stable by step order plus step identity, not incidental array order
 
@@ -122,6 +138,14 @@ Warnings:
 - Must honor same snapshot and canonicalization contract.
 - Share mutation is unsupported and must fail fast when requested.
 - Trustee persistence remains identity-congruent with downstream AWC expectations.
+- Native delete/update side effects are part of the same commit boundary and must be considered part of canonical post-save state.
+
+## 11.4.5 Native-Specific Save Semantics
+
+Observed native write path specifics to preserve in third-client parity work:
+- `Update()` is the persistence boundary for create/modify/delete.
+- Delete commit applies side effects including `LIBWF` repointing, `FIL.DEFWFID` reset, `NOTIFY` cleanup, and active-doc reconciliation.
+- System workflow mutability guards live in native/Desktop guard paths and must remain fail-fast invariants.
 
 ### Mock
 

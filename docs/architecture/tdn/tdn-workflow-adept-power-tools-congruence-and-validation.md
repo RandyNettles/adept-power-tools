@@ -4,6 +4,16 @@
 
 This TDN records Adept Power Tools-specific congruence, parsing, and validation policy notes that do not belong in the Adept 12 AWC deep-dive.
 
+## COM Path (11.4.5)
+
+The provided Adept 11.4.5 workflow evidence shows that admin CRUD congruence must also be measured against the native/Desktop route:
+- `CWorkFlowAdmin` add/edit/delete flows.
+- `CCliWorkflowDefManager` edit-session and `Update()` commit boundary.
+- Native child-list `Write()` persistence into WF/WFSTEP/WFTR/NOTIFY.
+
+11.4.5-specific implication:
+- Validation parity cannot be defined only against AWC HTTP save behavior; it also needs a native object-graph and table-write congruence lens.
+
 ## Timeout Round-Trip Congruence (Adept Power Tools vs AWC)
 
 ### What Matches AWC
@@ -108,3 +118,9 @@ Warnings:
 
 - AllowEmptyTrustees true with zero trustees.
 - Context visibility warnings that do not block save.
+
+## 11.4.5 Native-Specific Validation Notes
+
+- Native admin CRUD is not exposed through a dedicated AdeptWeb admin controller in the provided slice; pre-save validation must therefore be satisfied before entering native `Update()` commit paths.
+- Delete validation should include explicit active-document impact confirmation because native delete side effects reconcile active docs and workflow/library bindings during write-back.
+- System workflow edit/delete guards remain hard validation boundaries in native/Desktop mode.

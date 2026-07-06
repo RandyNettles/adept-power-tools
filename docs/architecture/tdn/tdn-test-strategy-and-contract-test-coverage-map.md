@@ -32,6 +32,12 @@ Primary references:
 - docs/architecture/tdn/tdn-workflow-save-boundary-and-canonicalization-contract.md
 - docs/architecture/tdn/tdn-workflow-identity-and-serialization-contract-third-client.md
 
+## COM Path (11.4.5)
+
+The provided Adept 11.4.5 workflow documents add native/Desktop evidence that should inform contract coverage expectations:
+- Active backend/runtime tests in Adept 11 include `SelectionCommand_Workflow_Tests.cs` for runtime workflow command behavior.
+- Admin workflow CRUD is Desktop/Core-first, so parity-sensitive contract tests for a third client should also consider native `Edit`/`Update` object-graph semantics, not just HTTP-mode service orchestration.
+
 ## Problem Statement
 
 The solution has meaningful unit-test coverage, especially in workflow transformation and service behavior, but lacks an explicit architecture artifact that states:
@@ -96,6 +102,9 @@ Coverage rating:
 | C6 Concurrency/locking/recovery | Locked-workflow exclusion in delete flow; transient save retry path on modify | `WorkflowServiceDeleteTests`, `WorkflowServiceModifyTests` | Partial |
 | C7 Observability and diagnostics schema | No explicit assertions on correlation IDs, structured event envelope, redaction classes | None in scoped suites | Gap |
 | C8 Session persistence and security boundaries | Mock auth state lifecycle only (login/logout/refresh) | `MockAdeptAuthServiceTests`, `MockAdeptApiClientTests` | Partial |
+
+11.4.5-specific testing note:
+- The supplied Adept 11 runtime evidence shows strong runtime command coverage, but not equivalent admin CRUD contract coverage for third-client authoring semantics.
 
 ## Existing Strengths
 
@@ -169,6 +178,7 @@ Priority order:
 3. Workflow locking/recovery contract tests (including warning/non-fatal paths).
 4. Observability envelope/redaction contract tests for operation lifecycle logging.
 5. Session boundary tests across persist/restore/invalidate transitions.
+6. COM/native parity tests for workflow admin graph semantics where adapter coverage is added (edit lock, `Update()` boundary, delete side effects, recipient dedupe rules).
 
 ## Contract-to-Suite Ownership
 

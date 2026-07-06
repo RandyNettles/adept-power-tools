@@ -31,6 +31,105 @@ Primary references:
 - src/AdeptTools.Workflow/Models/WorkflowEditModel.cs
 - src/AdeptTools.Workflow/Models/WorkflowAdminItem.cs
 
+## COM Path (11.4.5)
+
+Observed Adept 11.4.5 native admin locking path:
+- Modify lock/edit ownership is acquired through `CCliWorkflowDefManager::a11_Edit(workflowId, msg)`.
+- Native admin UI routes (`CWorkFlowAdmin`) respect that edit session before mutation and `Update()`.
+- Interop-visible surface is `Project.WorkflowDefManager.Edit(ref msg)` / `Update()` / `CancelEdit()`.
+
+11.4.5-specific implication:
+- COM mode should model lock ownership around native edit-session semantics, not around HTTP tag endpoints.
+- Adept 11.4.5 has three distinct native lock concepts in this slice:
+  - per-workflow edit lock using workflow id as tag identity,
+  - single-admin lock (`SINGLE_ADMIN_MGR_TAG_ID`) for destructive admin serialization,
+  - workflow-save lock (`WF_SAVE_LOCK_ID`) for save/copy serialization.
+
+## 11.4.5 Native Lock Model
+
+### Admin dialog session critical section
+
+Observed native session setup:
+- `CWorkFlowAdmin::OnInitDialog` calls `CCliWorkflowDefManager::a11_ReadyToEdit()`.
+- Admin tables are refreshed via `UpdateTGroups()`.
+- `LockCriticalSection(TRUE)` enters the admin editing critical section.
+
+Observed session close:
+- `CWorkFlowAdmin` destructor calls `a11_CloseEditSession()`.
+- `a11_CloseEditSession()` releases the critical section and reloads local admin tables.
+
+Policy implication:
+- COM/Desktop parity work should treat admin-session setup/teardown as a first-class lock lifecycle boundary, not just per-workflow tag acquisition.
+
+### Per-workflow edit lock
+
+Observed native modify route:
+- `CWorkFlowAdmin::OnBnClickedEditWF`
+- `CCliWorkflowDefManager::a11_Edit(workflowId, msg)`
+- rights validation
+- `TagWfUsingID(workflowId, msg)`
+- `ManagerTag(project, workflowId, ...)`
+
+Observed native outcomes:
+- Success marks the workflow editable and tracks ownership in `m_ListOfTaggedWF`.
+- Failure returns a lock-owner message using native lock-failure formatting and keeps the workflow non-editable.
+
+Observed native release paths:
+- `CancelWFTag(workflowId)` untags that workflow explicitly.
+- `Update()` untags the current system-tagged workflow id after successful write.
+- `Clear()` untags tracked workflow tags during manager teardown/reset.
+
+### Single-admin lock
+
+Observed native destructive-operation gate:
+- `ManagerTag(..., SINGLE_ADMIN_MGR_TAG_ID, ...)` is used to serialize destructive admin operations such as delete flows.
+- If denied, UI shows admin-in-progress warning and aborts the operation.
+- Release is via `ManagerUntag(..., SINGLE_ADMIN_MGR_TAG_ID)`.
+
+Policy implication:
+- Delete/reconcile paths in COM parity should not be modeled only as “locked workflow exclusion”; they also require a higher-scope destructive-operation lock concept.
+
+### Save/copy serialization lock
+
+Observed native save/copy gate:
+- `WF_SAVE_LOCK_ID = "WFMAN_SAVE_WF_LOCK"`.
+- Native flows acquire `ManagerTag(..., WF_SAVE_LOCK_ID, ...)` before save/copy naming windows.
+- If denied, UI warns that another admin is saving/copying a workflow.
+- Release occurs via `ReleaseGetWFLock()` calling `ManagerUntag(..., WF_SAVE_LOCK_ID)`.
+
+Policy implication:
+- COM/native parity may require a save-level serialization lock distinct from the workflow edit lock whenever naming/copy windows can race.
+
+### Lock state refresh and owner display
+
+Observed native refresh path:
+- `FillListBoxWithWF()` calls `a11_FindAllWFCurrentlyLocked()`.
+- `a11_FindAllWFCurrentlyLocked()` queries `LOCKS_DBN` and cross-checks IDs against workflow definitions.
+- Matches are stored in `m_ListOfTaggedWF`.
+- `PruneListOfLockedWF()` removes stale/zombie lock entries.
+
+Observed owner-display helpers:
+- `a11_GetTaggedByText(workflowId)` returns owner display text.
+- `IsWfLockedByAnother(workflowId)` and `IsWfLocked(workflowId)` drive UI enable/disable behavior.
+
+Policy implication:
+- User-facing lock state should be refreshable from authoritative lock-table state and stale local lock caches must be pruned.
+
+### Native lock utility layer
+
+Observed shared utility APIs:
+- `ManagerTagCheck(...)`
+- `ManagerTag(...)`
+- `ManagerUntag(...)`
+
+Observed backing behavior:
+- `ManagerTag` delegates to `RequestManager::TagRecord(...)`.
+- `ManagerUntag` delegates to `RequestManager::UnTagRecord(...)`.
+- Lock state is stored in `LOCKS_DBN`.
+
+Policy implication:
+- Lock identity should be treated as explicit tag ids with authoritative lock-table backing, not inferred solely from workflow records.
+
 ## Problem Statement
 
 Workflow authoring relies on tag/edit-lock semantics, but lock ownership, release guarantees, stale-lock recovery posture, and operator messaging need one explicit policy document.
@@ -49,6 +148,7 @@ Without a unified policy, concurrency outcomes can become inconsistent across CL
 4. Delete operations must not attempt force-delete against locked workflows; locked items are non-eligible.
 5. Stale-lock recovery is operator-mediated unless backend exposes explicit safe-force-unlock capability.
 6. User messaging must clearly distinguish lock contention, save failure, and cleanup uncertainty.
+7. COM/native mode may require multiple lock scopes for a single user operation: edit-session, per-workflow edit lock, destructive-operation lock, and save/copy serialization lock.
 
 ## Concurrency Model
 
@@ -67,6 +167,9 @@ Workflow operations use optimistic orchestration with explicit edit ownership:
 Design intent:
 - Avoid lost-update windows by not releasing lock before validation/readback checks complete.
 
+11.4.5 native qualification:
+- Native orchestration distinguishes per-workflow edit ownership from broader admin-session and destructive/save serialization locks.
+
 ## Lock Ownership Contract
 
 ### Authoritative owner
@@ -74,6 +177,9 @@ Design intent:
 - The active lock/tag owner is the actor that obtained editability for the current workflow.
 - For modify, ownership is established by successful `TagAsync` with `BEditable=true`.
 - For create, ownership is established by server create/edit session semantics.
+
+11.4.5 native qualification:
+- For modify, native authoritative ownership is the successful `a11_Edit`/`Edit` session.
 
 ### Non-owner behavior
 
@@ -93,6 +199,9 @@ Ownership must extend through:
 
 Only then may lock release occur.
 
+11.4.5 native qualification:
+- Native save paths also release the current system-tagged workflow id after successful `Update()`.
+
 ## Lock Lifecycle and Cleanup Policy
 
 ### Success path
@@ -103,10 +212,16 @@ Only then may lock release occur.
 4. Attempt `UntagAsync`.
 5. Return success; include cleanup warning if untag fails.
 
+11.4.5 native qualification:
+- Equivalent cleanup may involve releasing per-workflow tag, save/copy tag, and eventually closing the edit session critical section.
+
 ### Failure path
 
 - On any failure after lock acquisition, attempt untag before returning failure.
 - Cleanup attempt is best-effort and must not mask the original failure cause.
+
+11.4.5 native qualification:
+- Native cancel/error paths should include `CancelWFTag(workflowId)` or broader manager/session cleanup as appropriate for the active lock scope.
 
 ### Exception path
 
@@ -130,6 +245,9 @@ Eligibility rules:
 Operational behavior:
 - If all candidates are locked or otherwise non-eligible, operation completes with empty/no-op semantics and operator guidance.
 
+11.4.5 native qualification:
+- Native delete/admin paths additionally acquire `SINGLE_ADMIN_MGR_TAG_ID` so destructive operations are serialized even beyond per-workflow ownership checks.
+
 ## Timeout and Stale-Lock Recovery Strategy
 
 ## Baseline reality
@@ -148,6 +266,9 @@ When lock appears persistent and blocking:
 3. Advise operator to verify owner/session in authoritative admin surface.
 4. Retry operation after manual cleanup or owner confirmation.
 
+11.4.5 native qualification:
+- The provided Adept 11.4.5 evidence exposes edit-session ownership behavior but no safe automatic force-unlock primitive; operator-mediated recovery remains the correct default.
+
 ## Future capability gate
 
 If backend later supports safe stale-lock metadata and force-release API:
@@ -165,6 +286,9 @@ Required content:
 - Workflow name.
 - Lock owner when available.
 - Next action guidance (retry later or coordinate unlock).
+
+11.4.5 native qualification:
+- Native UI uses owner-aware lock-denied text for per-workflow edit failures and distinct warnings for save/copy contention and single-admin contention.
 
 ### Cleanup uncertainty message
 
@@ -190,6 +314,9 @@ Required message elements:
 1. Return skip/fail (per operation semantics) with owner info.
 2. Advise retry window.
 3. Do not mutate workflow.
+
+11.4.5 native variant:
+- Differentiate whether contention came from per-workflow tag, save/copy tag, or single-admin lock because the operator action differs.
 
 ## Playbook B: Save succeeded, untag failed
 
@@ -221,6 +348,15 @@ Required message elements:
 
 - Must preserve same lock ownership semantics even if transport signatures differ.
 - Lock-owner value normalization (blank/whitespace) is required before eligibility decisions.
+- Should map `Edit(ref msg)` / `a11_Edit` failures into the same user-facing lock contention contract used by HTTP mode.
+- Should expose or emulate native lock-scope distinctions where the operation semantics differ materially.
+
+## 11.4.5 Native-Specific Recovery Notes
+
+- `CancelEdit()` should be treated as the native cleanup path when an edit session is abandoned before `Update()`.
+- Delete/create/modify must never bypass native system-workflow guard behavior during lock-recovery handling.
+- Native clients should periodically refresh lock-table state and prune stale local lock-owner caches.
+- Save/copy contention should be surfaced separately from per-workflow edit contention.
 
 ### Mock
 
@@ -233,6 +369,8 @@ Required message elements:
 3. Preserve explicit lock-owner message on modify lock contention.
 4. Keep delete lock filtering deterministic and whitespace-safe.
 5. Do not add implicit stale-lock auto-break behavior without explicit backend capability contract.
+6. Preserve distinct lock scopes when COM/native semantics require them.
+7. Refresh authoritative lock state and prune stale local lock caches before presenting ownership state.
 
 ## Operational Checklist
 
@@ -242,6 +380,8 @@ Required message elements:
 4. Save-success + untag-fail surfaces warning (not silent).
 5. Delete excludes locked workflows and reports no-op outcomes clearly.
 6. Suspected stale locks route to manual verification playbook.
+7. COM/native mode distinguishes workflow-edit contention from save/copy contention and single-admin contention.
+8. Lock owner display is refreshed from authoritative lock-table state.
 
 ## Traceability
 
@@ -254,6 +394,16 @@ Primary implementation anchors:
 Related architecture context:
 - docs/architecture/tdn/tdn-workflow-adept-power-tools-hardening-notes.md
 - docs/architecture/tdn/tdn-workflow-save-boundary-and-canonicalization-contract.md
+
+11.4.5 native evidence anchors:
+- `nativemain/gui/WorkFlowAdmin.cpp`
+- `nativemain/gui/WorkFlowAdmin.h`
+- `nativemain/Core/CliWorkflowDefManager.cpp`
+- `nativemain/Core/CliWorkflowDefManager.h`
+- `nativemain/Core/ManagerUtils.cpp`
+- `nativemain/Core/ManagerUtils.h`
+- `nativemain/Core/nfmglobals.h`
+- `nativemain/Core/AdeptErrorCodes.h`
 
 ## Open Questions
 

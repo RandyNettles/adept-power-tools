@@ -23,6 +23,16 @@ Out of scope:
 - Share/container mutation details (covered elsewhere).
 - Delete/list filtering behavior.
 
+## COM Path (11.4.5)
+
+For Adept 11.4.5, these invariants must also hold on the native Desktop/Core admin route:
+- `CWorkFlowAdmin` entry points open editor flows.
+- `CCliWorkflowDefManager::a11_Edit(workflowId, msg)` establishes edit ownership for modify.
+- `CCliWorkflowDefList::Add/Delete` and child list `Write()` methods persist WF/WFSTEP/WFTR/NOTIFY state.
+
+11.4.5-specific implication:
+- Identity guarantees cannot rely on HTTP controller semantics because the provided Adept 11.4.5 admin path is object-graph mutation plus native write-back.
+
 ## Identity Model
 
 ### Step identity
@@ -37,11 +47,17 @@ Out of scope:
 - For User trustees, persisted trusteeId must remain identity-congruent with downstream AWC target identity expectations.
 - Reviewer trustee types are constrained to User, Group, or Key.
 
+11.4.5 native note:
+- Native trustee persistence writes `WFTR` trustee id plus type; the same `(type, trusteeId)` invariant must survive COM write-back.
+
 ### Notification identity
 
 - Notification recipients are identity tuples of (targetType, targetId) for non-email recipients.
 - Email notification recipients are identity tuples keyed by normalized email address.
 - Approvers recipient is identity-by-type (no required ID payload).
+
+11.4.5 native note:
+- Native notification rows also carry durable notification id, workflow object id, email, and ename fields in `NOTIFY`.
 
 ## Non-Negotiable Invariants
 
@@ -52,6 +68,7 @@ Out of scope:
 5. User trustee IDs must preserve canonical persisted form expected by AWC identity rehydration.
 6. Duplicate notification recipients must be collapsed by canonical identity key before save.
 7. Invalid notify/alert recipient rows must not be persisted silently as successful intent.
+8. Native and HTTP save paths must preserve the same recipient dedupe semantics.
 
 ## Step Mapping Contract
 
@@ -64,6 +81,9 @@ Out of scope:
 ### Why
 
 This prevents cross-step leakage when server step collections are returned out of incidental order.
+
+11.4.5 native qualification:
+- Native persistence is object-graph-driven, but step ownership invariants still apply because trustee/notification rows are written under step/workflow owner IDs.
 
 ## Reviewer Trustee Mapping Contract
 
@@ -100,6 +120,9 @@ Recipients are deduplicated by canonical key:
 - Email: E:<normalized-email>
 - Approvers: type-only key
 - Other recipients: <type>:<normalized-id>
+
+11.4.5 native note:
+- This matches observed native add-list behavior: email dedupe by lowercase email, Approvers by type only, other recipients by `(type, id)`.
 
 ### Validation
 
@@ -174,6 +197,7 @@ Warnings are allowed only for non-identity concerns (for example visibility cont
 
 - Must enforce the same invariants even if lower-level signatures differ.
 - Unsupported capabilities must fail fast without weakening identity guarantees.
+- Native `Edit`/`Update` flows must preserve unresolved rows and not silently discard recipient identities on reload.
 
 ### Mock
 
