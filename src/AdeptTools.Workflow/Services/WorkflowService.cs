@@ -853,6 +853,10 @@ public class WorkflowService : IWorkflowService
         var workflows = packet.Workflows;
 
         // Enrich list items with trustee counts for CLI reporting.
+        // Skipped for backends that do not support per-workflow detail calls efficiently
+        // (e.g. COM, where OpenWorkflow is a blocking call that serialises across all workflows).
+        if (_apiClient.Capabilities.SupportsListEnrichment)
+        {
         foreach (var wf in workflows)
         {
             try
@@ -880,6 +884,7 @@ public class WorkflowService : IWorkflowService
                 wf.NotifyCount = 0;
                 wf.AlertCount = 0;
             }
+        }
         }
 
         if (!string.IsNullOrWhiteSpace(request.Filter))

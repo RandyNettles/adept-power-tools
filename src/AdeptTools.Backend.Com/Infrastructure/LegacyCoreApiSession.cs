@@ -212,6 +212,9 @@ public sealed class LegacyCoreApiSession : ILegacyCoreApiSession, IDisposable
         }, ct);
     }
 
+    public Task<T> RunOnStaAsync<T>(Func<T> action, CancellationToken ct = default)
+        => _runner.RunAsync(action, ct);
+
     public async Task DisconnectAsync(CancellationToken ct = default)
     {
         await _runner.RunAsync(() =>

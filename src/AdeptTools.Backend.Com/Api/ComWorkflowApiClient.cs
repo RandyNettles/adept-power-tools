@@ -24,7 +24,8 @@ public class ComWorkflowApiClient : IWorkflowApiClient
     {
         SupportsShareMutation = false,
         SupportsUserDirectoryLookup = false,
-        SupportsGroupDirectoryLookup = false
+        SupportsGroupDirectoryLookup = false,
+        SupportsListEnrichment = false
     };
 
     public ComWorkflowApiClient(
@@ -86,35 +87,42 @@ public class ComWorkflowApiClient : IWorkflowApiClient
             throw;
         }
 
-        var packet = new WorkflowAdminPacket
+        // Enumerate workflows on the STA thread — admin is a COM object that must
+        // not be called from the thread pool after the preceding await.
+        var packet = await _legacySession.RunOnStaAsync(() =>
         {
-            CurrentUserId = info.UserId,
-            WfNameLen = TryGetInt(admin, "MaxWorkflowNameLength") ?? 64,
-            WfStepNameLen = TryGetInt(admin, "MaxStepNameLength") ?? 64,
-            Workflows = new List<WorkflowAdminItem>()
-        };
-
-        var count = InvokeGetInt(admin, "WorkflowCount");
-        for (var i = 0; i < count; i++)
-        {
-            var wfInfo = InvokeMethod(admin, "GetWorkflowInfo", i);
-            packet.Workflows.Add(new WorkflowAdminItem
+            var p = new WorkflowAdminPacket
             {
-                WorkflowId = InvokeGetString(wfInfo, "WorkflowId"),
-                WorkflowName = InvokeGetString(wfInfo, "Name"),
-                Active = InvokeGetBool(wfInfo, "Active"),
-                StepCount = InvokeGetInt(wfInfo, "StepCount"),
-                InProcessCount = InvokeGetInt(wfInfo, "InProcessCount"),
-                Edit = InvokeGetBool(wfInfo, "CanEdit"),
-                Share = InvokeGetBool(wfInfo, "CanShare"),
-                Delete = InvokeGetBool(wfInfo, "CanDelete"),
-                ShareStatus = NormalizeOptionalString(TryGetString(wfInfo, "ShareStatus")),
-                OwnerUserId = NormalizeOptionalString(TryGetString(wfInfo, "OwnerUserId")),
-                OwnerDisplayName = NormalizeOptionalString(TryGetString(wfInfo, "OwnerDisplayName")),
-                LockedByDisplayName = NormalizeOptionalString(InvokeGetString(wfInfo, "LockedByDisplayName"))
-            });
-            ReleaseCom(ref wfInfo);
-        }
+                CurrentUserId = info.UserId,
+                WfNameLen = TryGetInt(admin, "MaxWorkflowNameLength") ?? 64,
+                WfStepNameLen = TryGetInt(admin, "MaxStepNameLength") ?? 64,
+                Workflows = new List<WorkflowAdminItem>()
+            };
+
+            var count = InvokeGetInt(admin, "WorkflowCount");
+            for (var i = 0; i < count; i++)
+            {
+                var wfInfo = InvokeMethod(admin, "GetWorkflowInfo", i);
+                p.Workflows.Add(new WorkflowAdminItem
+                {
+                    WorkflowId = InvokeGetString(wfInfo, "WorkflowId"),
+                    WorkflowName = InvokeGetString(wfInfo, "Name"),
+                    Active = InvokeGetBool(wfInfo, "Active"),
+                    StepCount = InvokeGetInt(wfInfo, "StepCount"),
+                    InProcessCount = InvokeGetInt(wfInfo, "InProcessCount"),
+                    Edit = InvokeGetBool(wfInfo, "CanEdit"),
+                    Share = InvokeGetBool(wfInfo, "CanShare"),
+                    Delete = InvokeGetBool(wfInfo, "CanDelete"),
+                    ShareStatus = NormalizeOptionalString(TryGetString(wfInfo, "ShareStatus")),
+                    OwnerUserId = NormalizeOptionalString(TryGetString(wfInfo, "OwnerUserId")),
+                    OwnerDisplayName = NormalizeOptionalString(TryGetString(wfInfo, "OwnerDisplayName")),
+                    LockedByDisplayName = NormalizeOptionalString(InvokeGetString(wfInfo, "LockedByDisplayName"))
+                });
+                ReleaseCom(ref wfInfo);
+            }
+
+            return p;
+        }, ct);
 
         return packet;
     }
@@ -123,6 +131,9 @@ public class ComWorkflowApiClient : IWorkflowApiClient
     {
         var dispatch = await _legacySession.GetConnectedDispatchAsync(ct);
 
+        // All BFS traversal and COM calls must be on the STA thread.
+        return await _legacySession.RunOnStaAsync<WorkflowAdminPacket?>(() =>
+        {
         foreach (var (candidate, _) in EnumerateCandidates(dispatch))
         {
             var list = TryGetWorkflowDefinitionList(candidate);
@@ -228,6 +239,7 @@ public class ComWorkflowApiClient : IWorkflowApiClient
         }
 
         return null;
+        }, ct);
     }
 
     private static object? TryGetWorkflowDefinitionList(object candidate)
@@ -764,43 +776,55 @@ public class ComWorkflowApiClient : IWorkflowApiClient
         var dispatch = await _legacySession.GetConnectedDispatchAsync(ct);
         var attempted = new List<string>();
 
-        foreach (var (candidate, label) in EnumerateCandidates(dispatch))
+        // The BFS and every COM call that follows must run on the STA thread.
+        // After the await above the continuation may land on the thread pool;
+        // cross-apartment marshal calls to STA COM objects silently return null
+        // in .NET Core because the STA thread's BlockingCollection wait does not
+        // pump Windows messages.
+        var result = await _legacySession.RunOnStaAsync<object?>(() =>
         {
-            if (LooksLikeWorkflowAdmin(candidate))
-                return candidate;
-
-            foreach (var methodName in new[]
-                     {
-                         "GetWorkflowAdmin",
-                         "GetWorkFlowAdmin",
-                         "GetWfAdmin",
-                         "GetWFAdmin",
-                         "GetWorkflowAdministrator",
-                         "GetWorkflowManager"
-                     })
+            foreach (var (candidate, label) in EnumerateCandidates(dispatch))
             {
-                var workflowAdmin = TryInvoke(candidate, methodName);
-                if (workflowAdmin != null)
-                    return workflowAdmin;
-            }
+                if (LooksLikeWorkflowAdmin(candidate))
+                    return candidate;
 
-            foreach (var propertyName in new[]
-                     {
-                         "WorkflowAdmin",
-                         "WorkFlowAdmin",
-                         "WfAdmin",
-                         "WFAdmin",
-                         "WorkflowAdministrator",
-                         "WorkflowManager"
-                     })
-            {
-                var workflowAdmin = TryGetProperty(candidate, propertyName);
-                if (workflowAdmin != null)
-                    return workflowAdmin;
-            }
+                foreach (var methodName in new[]
+                         {
+                             "GetWorkflowAdmin",
+                             "GetWorkFlowAdmin",
+                             "GetWfAdmin",
+                             "GetWFAdmin",
+                             "GetWorkflowAdministrator",
+                             "GetWorkflowManager"
+                         })
+                {
+                    var workflowAdmin = TryInvoke(candidate, methodName);
+                    if (workflowAdmin != null)
+                        return workflowAdmin;
+                }
 
-            attempted.Add(label);
-        }
+                foreach (var propertyName in new[]
+                         {
+                             "WorkflowAdmin",
+                             "WorkFlowAdmin",
+                             "WfAdmin",
+                             "WFAdmin",
+                             "WorkflowAdministrator",
+                             "WorkflowManager"
+                         })
+                {
+                    var workflowAdmin = TryGetProperty(candidate, propertyName);
+                    if (workflowAdmin != null)
+                        return workflowAdmin;
+                }
+
+                attempted.Add(label);
+            }
+            return null;
+        }, ct);
+
+        if (result is not null)
+            return result;
 
         var sdkFallback = await TryGetWorkflowAdminFromSdkAsync(ct);
         if (sdkFallback is not null)

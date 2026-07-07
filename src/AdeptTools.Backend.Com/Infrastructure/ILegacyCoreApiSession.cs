@@ -22,5 +22,13 @@ public interface ILegacyCoreApiSession
 
     Task<object> GetConnectedDispatchAsync(CancellationToken ct = default);
 
+    /// <summary>
+    /// Schedules <paramref name="action"/> on the dedicated COM STA thread.
+    /// Use this when you already hold a COM dispatch object and need to call further
+    /// methods on it — cross-apartment marshal calls to STA objects silently fail in
+    /// .NET Core when made from the thread-pool.
+    /// </summary>
+    Task<T> RunOnStaAsync<T>(Func<T> action, CancellationToken ct = default);
+
     Task DisconnectAsync(CancellationToken ct = default);
 }
