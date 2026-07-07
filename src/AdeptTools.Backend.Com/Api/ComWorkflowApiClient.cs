@@ -20,6 +20,7 @@ public class ComWorkflowApiClient : IWorkflowApiClient
     private readonly ComSessionManager? _sessionManager;
     private readonly AdeptToolSettings? _settings;
     private readonly LegacyComFeatureFlags _flags;
+    private object? _cachedWorkflowAdmin;
     public WorkflowApiCapabilities Capabilities { get; } = new()
     {
         SupportsShareMutation = false,
@@ -67,97 +68,170 @@ public class ComWorkflowApiClient : IWorkflowApiClient
     {
         EnsureWorkflowEnabled();
         var info = await _legacySession.GetSessionInfoAsync(ct);
-
-        object? admin = null;
-        try
-        {
-            admin = await GetWorkflowAdminDispatchAsync(ct);
-        }
-        catch (NotSupportedException)
-        {
-            // Some legacy environments expose workflow definitions via
-            // Project.WorkflowDefManager.WorkflowDefList instead of GetWorkflowAdmin.
-            var fallback = await TryGetWorkflowsFromDefinitionManagerAsync(ct);
-            if (fallback is not null)
-            {
-                fallback.CurrentUserId = info.UserId;
-                return fallback;
-            }
-
-            throw;
-        }
-
-        // Enumerate workflows on the STA thread — admin is a COM object that must
-        // not be called from the thread pool after the preceding await.
-        var packet = await _legacySession.RunOnStaAsync(() =>
-        {
-            var p = new WorkflowAdminPacket
-            {
-                CurrentUserId = info.UserId,
-                WfNameLen = TryGetInt(admin, "MaxWorkflowNameLength") ?? 64,
-                WfStepNameLen = TryGetInt(admin, "MaxStepNameLength") ?? 64,
-                Workflows = new List<WorkflowAdminItem>()
-            };
-
-            var count = InvokeGetInt(admin, "WorkflowCount");
-            for (var i = 0; i < count; i++)
-            {
-                var wfInfo = InvokeMethod(admin, "GetWorkflowInfo", i);
-                p.Workflows.Add(new WorkflowAdminItem
-                {
-                    WorkflowId = InvokeGetString(wfInfo, "WorkflowId"),
-                    WorkflowName = InvokeGetString(wfInfo, "Name"),
-                    Active = InvokeGetBool(wfInfo, "Active"),
-                    StepCount = InvokeGetInt(wfInfo, "StepCount"),
-                    InProcessCount = InvokeGetInt(wfInfo, "InProcessCount"),
-                    Edit = InvokeGetBool(wfInfo, "CanEdit"),
-                    Share = InvokeGetBool(wfInfo, "CanShare"),
-                    Delete = InvokeGetBool(wfInfo, "CanDelete"),
-                    ShareStatus = NormalizeOptionalString(TryGetString(wfInfo, "ShareStatus")),
-                    OwnerUserId = NormalizeOptionalString(TryGetString(wfInfo, "OwnerUserId")),
-                    OwnerDisplayName = NormalizeOptionalString(TryGetString(wfInfo, "OwnerDisplayName")),
-                    LockedByDisplayName = NormalizeOptionalString(InvokeGetString(wfInfo, "LockedByDisplayName"))
-                });
-                ReleaseCom(ref wfInfo);
-            }
-
-            return p;
-        }, ct);
-
-        return packet;
-    }
-
-    private async Task<WorkflowAdminPacket?> TryGetWorkflowsFromDefinitionManagerAsync(CancellationToken ct)
-    {
         var dispatch = await _legacySession.GetConnectedDispatchAsync(ct);
 
-        // All BFS traversal and COM calls must be on the STA thread.
-        return await _legacySession.RunOnStaAsync<WorkflowAdminPacket?>(() =>
+        // Three-level resolution order for predictable performance:
+        // 1) direct known paths, 2) BFS fallback, 3) definition-list fallback.
+        return await _legacySession.RunOnStaAsync(() =>
         {
-        foreach (var (candidate, _) in EnumerateCandidates(dispatch))
+            var admin = TryGetWorkflowAdminDirect(dispatch);
+            if (admin != null)
+            {
+                _cachedWorkflowAdmin = admin;
+                var directPacket = new WorkflowAdminPacket
+                {
+                    CurrentUserId = info.UserId,
+                    WfNameLen = TryGetInt(admin, "MaxWorkflowNameLength") ?? 64,
+                    WfStepNameLen = TryGetInt(admin, "MaxStepNameLength") ?? 64,
+                    Workflows = new List<WorkflowAdminItem>()
+                };
+
+                var directCount = InvokeGetInt(admin, "WorkflowCount");
+                for (var i = 0; i < directCount; i++)
+                {
+                    var wfInfo = InvokeMethod(admin, "GetWorkflowInfo", i);
+                    directPacket.Workflows.Add(new WorkflowAdminItem
+                    {
+                        WorkflowId = InvokeGetString(wfInfo, "WorkflowId"),
+                        WorkflowName = InvokeGetString(wfInfo, "Name"),
+                        Active = InvokeGetBool(wfInfo, "Active"),
+                        StepCount = InvokeGetInt(wfInfo, "StepCount"),
+                        InProcessCount = InvokeGetInt(wfInfo, "InProcessCount"),
+                        Edit = InvokeGetBool(wfInfo, "CanEdit"),
+                        Share = InvokeGetBool(wfInfo, "CanShare"),
+                        Delete = InvokeGetBool(wfInfo, "CanDelete"),
+                        ShareStatus = NormalizeOptionalString(TryGetString(wfInfo, "ShareStatus")),
+                        OwnerUserId = NormalizeOptionalString(TryGetString(wfInfo, "OwnerUserId")),
+                        OwnerDisplayName = NormalizeOptionalString(TryGetString(wfInfo, "OwnerDisplayName")),
+                        LockedByDisplayName = NormalizeOptionalString(InvokeGetString(wfInfo, "LockedByDisplayName"))
+                    });
+                    ReleaseCom(ref wfInfo);
+                }
+
+                return directPacket;
+            }
+
+            var attempted = new List<string>();
+            WorkflowAdminPacket? defListPacket = null;
+
+            foreach (var (candidate, label) in EnumerateCandidates(dispatch))
+            {
+                var discoveredAdmin = TryGetWorkflowAdminFromCandidate(candidate);
+                if (discoveredAdmin != null)
+                {
+                    _cachedWorkflowAdmin = discoveredAdmin;
+                    var p = new WorkflowAdminPacket
+                    {
+                        CurrentUserId = info.UserId,
+                        WfNameLen = TryGetInt(discoveredAdmin, "MaxWorkflowNameLength") ?? 64,
+                        WfStepNameLen = TryGetInt(discoveredAdmin, "MaxStepNameLength") ?? 64,
+                        Workflows = new List<WorkflowAdminItem>()
+                    };
+                    var count = InvokeGetInt(discoveredAdmin, "WorkflowCount");
+                    for (var i = 0; i < count; i++)
+                    {
+                        var wfInfo = InvokeMethod(discoveredAdmin, "GetWorkflowInfo", i);
+                        p.Workflows.Add(new WorkflowAdminItem
+                        {
+                            WorkflowId = InvokeGetString(wfInfo, "WorkflowId"),
+                            WorkflowName = InvokeGetString(wfInfo, "Name"),
+                            Active = InvokeGetBool(wfInfo, "Active"),
+                            StepCount = InvokeGetInt(wfInfo, "StepCount"),
+                            InProcessCount = InvokeGetInt(wfInfo, "InProcessCount"),
+                            Edit = InvokeGetBool(wfInfo, "CanEdit"),
+                            Share = InvokeGetBool(wfInfo, "CanShare"),
+                            Delete = InvokeGetBool(wfInfo, "CanDelete"),
+                            ShareStatus = NormalizeOptionalString(TryGetString(wfInfo, "ShareStatus")),
+                            OwnerUserId = NormalizeOptionalString(TryGetString(wfInfo, "OwnerUserId")),
+                            OwnerDisplayName = NormalizeOptionalString(TryGetString(wfInfo, "OwnerDisplayName")),
+                            LockedByDisplayName = NormalizeOptionalString(InvokeGetString(wfInfo, "LockedByDisplayName"))
+                        });
+                        ReleaseCom(ref wfInfo);
+                    }
+                    return p;
+                }
+
+                // Path B: WorkflowDefList (accumulate first match as fallback).
+                if (defListPacket == null)
+                {
+                    var list = TryGetWorkflowDefinitionList(candidate);
+                    if (list != null)
+                        defListPacket = BuildPacketFromDefList(list, info.UserId);
+                }
+
+                attempted.Add(label);
+            }
+
+            if (defListPacket != null)
+                return defListPacket;
+
+            throw new NotSupportedException(
+                "Legacy COM session does not expose workflow administration (GetWorkflowAdmin/WorkflowAdmin). " +
+                $"Probed candidates: {string.Join(", ", attempted)}");
+        }, ct);
+    }
+
+    private static WorkflowAdminPacket BuildPacketFromDefList(object list, string? userId)
+    {
+        var packet = new WorkflowAdminPacket
         {
-            var list = TryGetWorkflowDefinitionList(candidate);
-            if (list is null)
+            CurrentUserId = userId,
+            WfNameLen = 64,
+            WfStepNameLen = 64,
+            Workflows = new List<WorkflowAdminItem>()
+        };
+
+        var count = TryInvokeIntByNames(list, "GetCount", "Count", "WorkflowCount", "GetWorkflowCount")
+                    ?? TryGetInt(list, "Count")
+                    ?? TryGetInt(list, "WorkflowCount")
+                    ?? 0;
+
+        var anyItems = false;
+
+        for (var i = 0; i < count; i++)
+        {
+            var wf = TryInvoke(list, "GetItem", i)
+                     ?? TryInvoke(list, "GetItem", i + 1);
+            if (wf is null)
                 continue;
 
-            var packet = new WorkflowAdminPacket
+            try
             {
-                WfNameLen = 64,
-                WfStepNameLen = 64,
-                Workflows = new List<WorkflowAdminItem>()
-            };
+                anyItems = true;
+                var name = TryGetString(wf, "Name") ?? string.Empty;
+                var id = TryGetString(wf, "Id") ?? TryGetString(wf, "WorkflowId") ?? name;
+                var stepCount = TryGetStepCountFromDefinition(wf) ?? 0;
+                var isActive = TryGetBool(wf, "Active")
+                               ?? TryGetBool(wf, "bActive")
+                               ?? true;
 
-            var count = TryInvokeIntByNames(list, "GetCount", "Count", "WorkflowCount", "GetWorkflowCount")
-                        ?? TryGetInt(list, "Count")
-                        ?? TryGetInt(list, "WorkflowCount")
-                        ?? 0;
+                packet.Workflows.Add(new WorkflowAdminItem
+                {
+                    WorkflowId = id,
+                    WorkflowName = name,
+                    Active = isActive,
+                    StepCount = stepCount,
+                    InProcessCount = 0,
+                    Edit = true,
+                    Share = true,
+                    Delete = true,
+                    LockedByDisplayName = null
+                });
 
-            var anyItems = false;
-
-            for (var i = 0; i < count; i++)
+                if (!string.IsNullOrEmpty(name))
+                    packet.WfNameLen = Math.Max(packet.WfNameLen, name.Length);
+            }
+            finally
             {
-                var wf = TryInvoke(list, "GetItem", i)
-                         ?? TryInvoke(list, "GetItem", i + 1);
+                ReleaseCom(ref wf);
+            }
+        }
+
+        // Some legacy COM lists are enumerable but do not expose GetCount/GetItem.
+        if (!anyItems)
+        {
+            foreach (var wf in EnumerateComItems(list))
+            {
                 if (wf is null)
                     continue;
 
@@ -189,57 +263,13 @@ public class ComWorkflowApiClient : IWorkflowApiClient
                 }
                 finally
                 {
-                    ReleaseCom(ref wf);
+                    var tmp = wf;
+                    ReleaseCom(ref tmp);
                 }
             }
-
-            // Some legacy COM lists are enumerable but do not expose GetCount/GetItem.
-            if (!anyItems)
-            {
-                foreach (var wf in EnumerateComItems(list))
-                {
-                    if (wf is null)
-                        continue;
-
-                    try
-                    {
-                        anyItems = true;
-                        var name = TryGetString(wf, "Name") ?? string.Empty;
-                        var id = TryGetString(wf, "Id") ?? TryGetString(wf, "WorkflowId") ?? name;
-                        var stepCount = TryGetStepCountFromDefinition(wf) ?? 0;
-                        var isActive = TryGetBool(wf, "Active")
-                                       ?? TryGetBool(wf, "bActive")
-                                       ?? true;
-
-                        packet.Workflows.Add(new WorkflowAdminItem
-                        {
-                            WorkflowId = id,
-                            WorkflowName = name,
-                            Active = isActive,
-                            StepCount = stepCount,
-                            InProcessCount = 0,
-                            Edit = true,
-                            Share = true,
-                            Delete = true,
-                            LockedByDisplayName = null
-                        });
-
-                        if (!string.IsNullOrEmpty(name))
-                            packet.WfNameLen = Math.Max(packet.WfNameLen, name.Length);
-                    }
-                    finally
-                    {
-                        var tmp = wf;
-                        ReleaseCom(ref tmp);
-                    }
-                }
-            }
-
-            return packet;
         }
 
-        return null;
-        }, ct);
+        return packet;
     }
 
     private static object? TryGetWorkflowDefinitionList(object candidate)
@@ -771,8 +801,78 @@ public class ComWorkflowApiClient : IWorkflowApiClient
         };
     }
 
+    private static object? TryGetWorkflowAdminDirect(object dispatch)
+    {
+        if (LooksLikeWorkflowAdmin(dispatch))
+            return dispatch;
+
+        // Pattern: dispatch.GetWorkflowAdmin() or dispatch.WorkflowAdmin
+        var admin = TryInvoke(dispatch, "GetWorkflowAdmin")
+                    ?? TryGetProperty(dispatch, "WorkflowAdmin");
+        if (admin != null)
+            return admin;
+
+        // Pattern: dispatch.GetProject().GetWorkflowAdmin()
+        var project = TryInvoke(dispatch, "GetProject")
+                      ?? TryGetProperty(dispatch, "Project");
+        if (project is null)
+            return null;
+
+        return TryInvoke(project, "GetWorkflowAdmin")
+               ?? TryGetProperty(project, "WorkflowAdmin");
+    }
+
+    private static object? TryGetWorkflowAdminFromCandidate(object candidate)
+    {
+        if (LooksLikeWorkflowAdmin(candidate))
+            return candidate;
+
+        foreach (var methodName in new[]
+                 {
+                     "GetWorkflowAdmin",
+                     "GetWorkFlowAdmin",
+                     "GetWfAdmin",
+                     "GetWFAdmin",
+                     "GetWorkflowAdministrator",
+                     "GetWorkflowManager"
+                 })
+        {
+            var admin = TryInvoke(candidate, methodName);
+            if (admin != null)
+                return admin;
+        }
+
+        foreach (var propertyName in new[]
+                 {
+                     "WorkflowAdmin",
+                     "WorkFlowAdmin",
+                     "WfAdmin",
+                     "WFAdmin",
+                     "WorkflowAdministrator",
+                     "WorkflowManager"
+                 })
+        {
+            var admin = TryGetProperty(candidate, propertyName);
+            if (admin != null)
+                return admin;
+        }
+
+        return null;
+    }
+
     private async Task<object> GetWorkflowAdminDispatchAsync(CancellationToken ct)
     {
+        if (_cachedWorkflowAdmin is not null)
+            return _cachedWorkflowAdmin;
+
+        // SDK fast path: deterministic typed interface call.
+        if (_sessionManager is not null && _sessionManager.IsConnected)
+        {
+            var sdkAdmin = await _sessionManager.GetWorkflowAdminAsync(ct);
+            _cachedWorkflowAdmin = sdkAdmin;
+            return sdkAdmin;
+        }
+
         var dispatch = await _legacySession.GetConnectedDispatchAsync(ct);
         var attempted = new List<string>();
 
@@ -783,39 +883,21 @@ public class ComWorkflowApiClient : IWorkflowApiClient
         // pump Windows messages.
         var result = await _legacySession.RunOnStaAsync<object?>(() =>
         {
+            // Known direct legacy patterns before BFS.
+            var directAdmin = TryGetWorkflowAdminDirect(dispatch);
+            if (directAdmin != null)
+            {
+                _cachedWorkflowAdmin = directAdmin;
+                return directAdmin;
+            }
+
             foreach (var (candidate, label) in EnumerateCandidates(dispatch))
             {
-                if (LooksLikeWorkflowAdmin(candidate))
-                    return candidate;
-
-                foreach (var methodName in new[]
-                         {
-                             "GetWorkflowAdmin",
-                             "GetWorkFlowAdmin",
-                             "GetWfAdmin",
-                             "GetWFAdmin",
-                             "GetWorkflowAdministrator",
-                             "GetWorkflowManager"
-                         })
+                var admin = TryGetWorkflowAdminFromCandidate(candidate);
+                if (admin != null)
                 {
-                    var workflowAdmin = TryInvoke(candidate, methodName);
-                    if (workflowAdmin != null)
-                        return workflowAdmin;
-                }
-
-                foreach (var propertyName in new[]
-                         {
-                             "WorkflowAdmin",
-                             "WorkFlowAdmin",
-                             "WfAdmin",
-                             "WFAdmin",
-                             "WorkflowAdministrator",
-                             "WorkflowManager"
-                         })
-                {
-                    var workflowAdmin = TryGetProperty(candidate, propertyName);
-                    if (workflowAdmin != null)
-                        return workflowAdmin;
+                    _cachedWorkflowAdmin = admin;
+                    return admin;
                 }
 
                 attempted.Add(label);
@@ -828,7 +910,10 @@ public class ComWorkflowApiClient : IWorkflowApiClient
 
         var sdkFallback = await TryGetWorkflowAdminFromSdkAsync(ct);
         if (sdkFallback is not null)
+        {
+            _cachedWorkflowAdmin = sdkFallback;
             return sdkFallback;
+        }
 
         throw new NotSupportedException(
             "Legacy COM session does not expose workflow administration (GetWorkflowAdmin/WorkflowAdmin). " +
@@ -894,7 +979,7 @@ public class ComWorkflowApiClient : IWorkflowApiClient
 
             yield return (candidate, label);
 
-            if (depth >= 5)
+            if (depth >= 3)
                 continue;
 
             foreach (var methodName in new[]
