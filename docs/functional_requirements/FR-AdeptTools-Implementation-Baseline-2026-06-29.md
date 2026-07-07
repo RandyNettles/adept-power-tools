@@ -268,6 +268,11 @@ Evidence:
 - src/AdeptTools.Launcher/ViewModels/TemplateViewModel.cs
 - src/AdeptTools.Launcher/Views/TemplatePage.xaml
 
+FR-040
+The import Excel template and row parser shall support defining multiple trustees within a single row using a defined delimiter or column convention; each trustee entry shall be individually validated, and unresolvable entries shall produce a per-row validation error without blocking other rows.
+Evidence:
+- TBD
+
 ## Notes
 - This baseline is implementation-derived and should be updated when behavior changes.
 - Requirement IDs are stable references and should be retained in future revisions.

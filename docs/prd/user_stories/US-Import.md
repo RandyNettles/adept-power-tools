@@ -88,3 +88,14 @@ Acceptance Criteria
 
 FR Traceability
 - FR-039
+
+## US-IMP-009 Multi-Trustee Row Definition
+As an import operator, I want to define multiple trustees within a single row in the Excel template so that I can configure workflows more efficiently.
+
+Acceptance Criteria
+1. A single import row supports specifying multiple trustees using a defined delimiter or column convention.
+2. Each trustee entry within a row is individually validated before the row is processed.
+3. Invalid or unresolvable trustee entries produce a per-row validation error without blocking other rows.
+
+FR Traceability
+- FR-040
