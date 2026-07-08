@@ -178,9 +178,9 @@
                         </Grid>
                     </Border>
 
-                    <!-- Test Connection Button -->
+                    <!-- Login Button -->
                     <StackPanel Orientation="Horizontal" Margin="0,0,0,16">
-                        <Button Content="Test Connection"
+                        <Button Content="Login"
                                 Command="{Binding TestConnectionCommand}"
                                 Style="{StaticResource PrimaryButtonStyle}" />
                         <Button Content="Logout"
