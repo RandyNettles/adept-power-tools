@@ -67,3 +67,21 @@ Acceptance Criteria
 
 FR Traceability
 - FR-031
+
+## US-WF-007 Export Workflows to Excel Template (Planned)
+As a workflow admin, I want to export one or more selected workflows into a single Excel workbook with one workflow per worksheet, so that I can use that workbook as the source for the modify operation.
+
+Acceptance Criteria
+1. Export accepts a selection of one or more existing server workflows and produces a single `.xlsx` workbook.
+2. Each exported workflow is written to its own worksheet named per the `WF-` prefix naming rules; the workbook includes a `Config` sheet.
+3. Exported worksheets follow the same layout the workflow reader consumes, so the resulting file is valid input for `workflow modify` without manual reformatting.
+4. Full workflow detail is exported: memo, deadline, active, shared, and each step's approvals-required, auto-advance, and trustees with Reviewer/Notify/Alert roles.
+5. When a workflow name cannot be represented exactly as a worksheet name (length or illegal characters), the sheet name is sanitized while the authoritative workflow name is preserved so the modify round-trip still targets the correct workflow.
+6. Export is available from both the CLI (`workflow export`) and the Launcher ("Export Selected to Excel"), with progress and per-workflow result reporting.
+
+FR Traceability
+- FR-041
+- FR-042
+- FR-043
+- FR-044
+- FR-045

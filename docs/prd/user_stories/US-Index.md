@@ -8,7 +8,7 @@
 - US-CLI-001..US-CLI-005: CLI platform and command flows
 - US-CONN-001..US-CONN-006: Client connection and navigation
 - US-AUTH-001..US-AUTH-006: Authentication and session lifecycle
-- US-WF-001..US-WF-006: Workflow operations
+- US-WF-001..US-WF-007: Workflow operations
 - US-IMP-001..US-006: Import operations and template UX
 
 ## Files

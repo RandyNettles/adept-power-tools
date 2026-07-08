@@ -48,18 +48,22 @@ Rows above the step table:
 - Row 3, column 2: `Memo`
 - Row 4, column 2: `Deadline (days)`
 - Row 5, column 2: `Active`
+- Row 6, column 2: `Shared`
 
 Step table header row:
-- Row 7 must contain these headers:
+- The reader locates the header row dynamically by scanning column 1 for the `Step Name` header, so an instruction row above the table does not break parsing.
+- The header row must contain these headers:
   - `Step Name`
   - `Approvals Required`
   - `Auto Advance`
+  - `Allow Empty Trustees`
   - `Trustee`
   - `Type`
   - `Role`
+- `Allow Empty Trustees` is optional; if the column is absent it is treated as not set.
 
 Data rows:
-- Step data starts on row 8.
+- Step data starts on the row immediately after the header row.
 - A new workflow step begins whenever `Step Name` is non-empty.
 - Rows below that step with an empty `Step Name` cell are treated as additional trustee rows for the current step.
 
@@ -67,6 +71,7 @@ Data rows:
 - `Step Name`: Name of the workflow step. Required for the first row of each step.
 - `Approvals Required`: Integer value, `0` or greater.
 - `Auto Advance`: Boolean. Accepted true values include `true`, `yes`, `1`, `✓`. Accepted false values include `false`, `no`, `0`, `✗`.
+- `Allow Empty Trustees`: Optional boolean. When `true`, a step with no trustees is accepted without the usual warning. Uses the same accepted true/false values as `Auto Advance`.
 - `Trustee`: Trustee identifier. This may be a single ID or a comma-separated list of IDs.
 - `Type`: One of `User`, `Group`, `Meta`, or `Email`.
 - `Role`: One of `Reviewer`, `Notify`, or `Alert`.
@@ -200,6 +205,33 @@ dotnet run --project src/AdeptTools.Cli -- --server https://adept.example.com wo
 4. Update the duplicated sheet name so each workflow name is unique.
 5. Fill in workflow metadata and step rows.
 6. Run a dry-run before applying changes.
+
+## Exporting Existing Workflows (Planned)
+
+> Status: Planned feature (US-WF-007). This section describes intended behavior and is not yet
+> implemented.
+
+Instead of authoring a workbook by hand, you will be able to export one or more existing server
+workflows into a single workbook that already matches this template format, then edit that workbook
+and apply the changes with `workflow modify`.
+
+Planned surfaces:
+- CLI: `workflow export --out <path.xlsx> [--filter <pattern>]`
+- Client: select one or more workflows and choose "Export Selected to Excel".
+
+Export behavior:
+- Produces one workbook with one `WF-` worksheet per selected workflow plus a shared `Config` sheet.
+- Populates workflow metadata (memo, deadline, active, shared) and step rows (trustees with
+  `Reviewer`/`Notify`/`Alert` roles) from the current server state.
+- Writes the exported `Config` sheet with `DryRun=true` by default.
+
+Worksheet naming and identity (see ADR-0007):
+- Worksheet names are sanitized to satisfy Excel rules (31-character limit; no `: \ / ? * [ ]`) and
+  are made unique within the workbook.
+- The exact workflow name is preserved in the worksheet (Row 1) so `workflow modify` targets the
+  correct workflow even when the sheet name was shortened or altered.
+- The Row 1 workflow-name cell is authoritative for modify. Renaming only the sheet tab does not
+  retarget a different workflow; edit the Row 1 name if you intend to change the target.
 
 ## Troubleshooting
 

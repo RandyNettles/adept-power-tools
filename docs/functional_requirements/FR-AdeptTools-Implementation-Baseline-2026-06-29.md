@@ -273,6 +273,41 @@ The import Excel template and row parser shall support defining multiple trustee
 Evidence:
 - TBD
 
+### Workflow — Export (Planned)
+
+The following requirements describe planned behavior for exporting existing workflows to the Excel template format. They are not yet implemented; Evidence lists the intended locations.
+
+FR-041
+The workflow service shall export one or more selected workflows into a single Excel workbook containing one `WF-` worksheet per workflow plus a `Config` sheet, in the same template layout consumed by the workflow Excel reader, so the exported file is valid input for the modify operation without manual reformatting.
+Evidence (planned):
+- src/AdeptTools.Workflow/Input/WorkflowExcelWriter.cs
+- src/AdeptTools.Workflow/Services/IWorkflowService.cs
+- src/AdeptTools.Workflow/Services/WorkflowService.cs
+
+FR-042
+Workflow export shall fetch full per-workflow detail from the backend and faithfully reconstruct workflow-level fields (memo, deadline, active, shared) and each step's approvals-required, auto-advance, and trustees, mapping server reviewer, email-notification, and alert-notification collections back to the `Reviewer`, `Notify`, and `Alert` role values.
+Evidence (planned):
+- src/AdeptTools.Workflow/Api/IWorkflowApiClient.cs
+- src/AdeptTools.Workflow/Models/WorkflowEditModel.cs
+- src/AdeptTools.Workflow/Input/WorkflowExcelWriter.cs
+
+FR-043
+Workflow export shall name each worksheet using the `WF-` prefix and shall sanitize worksheet names to satisfy Excel constraints (maximum length and illegal characters) and to keep sheet names unique within the workbook; the authoritative workflow name shall be persisted in the worksheet so the modify operation resolves the correct target workflow even when the sheet name is sanitized. The workflow Excel reader shall prefer the persisted workflow name over the sheet-tab name when present, and fall back to the sheet-tab name for backward compatibility.
+Evidence (planned):
+- src/AdeptTools.Workflow/Input/WorkflowExcelWriter.cs
+- src/AdeptTools.Workflow/Input/WorkflowExcelReader.cs
+
+FR-044
+The CLI shall provide a `workflow export` command that writes the export workbook to a specified output path and supports selecting workflows by filter, with script-friendly result reporting.
+Evidence (planned):
+- src/AdeptTools.Cli/Commands/WorkflowCommands.cs
+
+FR-045
+The launcher workflow UX shall support exporting the currently selected workflows to an Excel workbook via a save-file dialog, with the action gated on a non-empty selection and with progress, cancellation, and per-workflow result messages.
+Evidence (planned):
+- src/AdeptTools.Launcher/ViewModels/WorkflowViewModel.cs
+- src/AdeptTools.Launcher/Views/WorkflowPage.xaml
+
 ## Notes
 - This baseline is implementation-derived and should be updated when behavior changes.
 - Requirement IDs are stable references and should be retained in future revisions.
