@@ -10,10 +10,12 @@ namespace AdeptTools.Backend.Com.Auth;
 public class ComAdeptAuthService : IAdeptAuthService
 {
     private readonly ILegacyCoreApiSession _legacySession;
+    private readonly ComSessionManager? _sessionManager;
 
-    public ComAdeptAuthService(ILegacyCoreApiSession legacySession)
+    public ComAdeptAuthService(ILegacyCoreApiSession legacySession, ComSessionManager? sessionManager = null)
     {
         _legacySession = legacySession;
+        _sessionManager = sessionManager;
     }
 
     public bool IsAuthenticated => _legacySession.IsConnected;
@@ -34,6 +36,21 @@ public class ComAdeptAuthService : IAdeptAuthService
                 return new AuthResult(
                     Success: false,
                     ErrorMessage: $"COM connection failed with error code {result}.");
+            }
+
+            // Best-effort: also connect the NxProject SDK session so that
+            // GetWorkflowAdmin() is available via the typed SDK fast path.
+            // CoreApi (legacy) does not expose GetWorkflowAdmin; NxProject does.
+            if (_sessionManager is not null && !_sessionManager.IsConnected)
+            {
+                try
+                {
+                    await _sessionManager.ConnectAsync(serverUrl, userName, password, ct);
+                }
+                catch
+                {
+                    // NxProject connection failure is non-fatal; fall back to BFS.
+                }
             }
 
             var info = await _legacySession.GetSessionInfoAsync(ct);
@@ -71,6 +88,18 @@ public class ComAdeptAuthService : IAdeptAuthService
     public async Task LogoutAsync(CancellationToken ct = default)
     {
         await _legacySession.DisconnectAsync(ct);
+
+        if (_sessionManager is not null && _sessionManager.IsConnected)
+        {
+            try
+            {
+                await _sessionManager.DisconnectAsync(ct);
+            }
+            catch
+            {
+                // Best-effort disconnect.
+            }
+        }
     }
 
     public Task<AuthResult> RefreshAsync(CancellationToken ct = default)

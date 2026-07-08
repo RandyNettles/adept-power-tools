@@ -8,6 +8,9 @@
 		},
 		{
 			"path": "../Adept12"
+		},
+		{
+			"path": "../Adept11/Adept11/Native/Main"
 		}
 	],
 	"settings": {}

@@ -107,7 +107,30 @@ Expected result:
 - Exit code `0`
 - Status reports connected
 
-### 2) Workflow Listing
+### 2) Logout / Session Clear
+Clear the active session and delete the persisted auth token file:
+
+```powershell
+dotnet run --project src/AdeptTools.Cli -- --server https://adept.example.com auth logout
+```
+
+Published binary:
+
+```powershell
+.\publish\adept-tool.exe --server https://adept.example.com auth logout
+```
+
+Expected result:
+- Exit code `0`
+- Output: `Logged out`
+- Persisted session file (`cli-http-auth-session.dat`) is deleted from LocalAppData
+
+Behavior notes:
+- HTTP backend: clears in-memory tokens and authorization headers. No remote token revocation call is made.
+- COM backend: calls `DisconnectAsync` to release the native session object.
+- After logout, the next command requiring authentication will trigger a fresh login.
+
+### 3) Workflow Listing
 Table output:
 
 ```powershell
@@ -126,7 +149,7 @@ JSON output:
 dotnet run --project src/AdeptTools.Cli -- --server https://adept.example.com workflow list --format json
 ```
 
-### 3) Workflow Create or Modify
+### 4) Workflow Create or Modify
 Create from Excel:
 
 ```powershell
@@ -145,7 +168,7 @@ Dry-run validation:
 dotnet run --project src/AdeptTools.Cli -- --server https://adept.example.com workflow create --excel C:\temp\workflow.xlsx --dry-run
 ```
 
-### 4) Workflow Delete (High Risk)
+### 5) Workflow Delete (High Risk)
 Preview only:
 
 ```powershell
@@ -175,7 +198,7 @@ Safety notes:
 - Wildcard-only deletion requires `--force`.
 - If documents are in-process, they are moved to the system workflow.
 
-### 5) Import Flow
+### 6) Import Flow
 Fetch field definitions:
 
 ```powershell
@@ -205,6 +228,20 @@ Run import with detailed log:
 ```powershell
 dotnet run --project src/AdeptTools.Cli -- --server https://adept.example.com import run --excel C:\temp\input.xlsx --config C:\temp\mapping.xml --log-file C:\temp\import-run.log
 ```
+
+#### Multi-Trustee Delimiter Support
+The trustee column in an import workbook accepts multiple trustees in a single cell. Any of the following delimiter characters are recognized: pipe (`|`), semicolon (`;`), comma (`,`).
+
+Examples of valid cell values:
+- `user1@domain.com|user2@domain.com` (pipe — recommended; unambiguous in all Adept identity formats)
+- `user1@domain.com;user2@domain.com` (semicolon)
+- `user1@domain.com,user2@domain.com` (comma — compatible with existing DDM spreadsheets)
+
+Caution with comma delimiter:
+- Adept display names in `Last, First` format contain a comma. A cell using comma as the delimiter will split at the embedded comma, producing spurious tokens and a per-row validation error.
+- If your environment uses `Last, First` display names, use pipe or semicolon as the cell delimiter instead.
+
+See ADR-0006 and `tdn-import-multi-trustee-delimiter-encoding.md` for full specification.
 
 ## Exit Codes
 Common meanings observed from command handlers:
